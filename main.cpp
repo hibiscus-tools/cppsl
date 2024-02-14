@@ -34,22 +34,30 @@ constexpr shader_io_type operator|(shader_io_type A, shader_io_type B)
 }
 
 enum class primitive_operation {
-	add, sub, mul, div
+	add, sub, mul, div,
+	uneg
 };
 
-struct fetch_layout {
+enum class iop {
+	fetch,
+	store
+};
+
+// TODO: add a bool to reflect fetch or set
+struct shader_layout {
 	glsl    type;
 	int32_t binding;
+	iop     fs;
+};
+
+// TODO: also fetch instrincs
+enum class stash_intrinsic {
+	si_gl_Position
 };
 
 struct fetch_push_constants {
 	glsl    type;
 	int32_t location;
-};
-
-struct stash_layout {
-	glsl    type;
-	int32_t binding;
 };
 
 struct constructor {
@@ -63,12 +71,19 @@ constructor constructor_for()
 	return { T::underlying, N };
 }
 
+struct static_indexing {
+	glsl     original;
+	uint32_t index;
+	iop      fs;    // either fetch or set
+};
+
 using instruction_base = std::variant <
 	primitive_operation,
-	fetch_layout,
+	shader_layout,
+	stash_intrinsic,
 	fetch_push_constants,
-	stash_layout,
 	constructor,
+	static_indexing,
 	float,
 	int32_t
 >;
@@ -133,28 +148,78 @@ stream concat_args(const T &streamer, const Args &... args)
 	}
 }
 
+// Indexer types
+// TODO: single for now
+template <typename Owner, streamable T, uint32_t index>
+// TODO: defer checking that owner is streamable? or simply ignore?
+struct index_ref {
+	Owner &owner;
+
+	index_ref(Owner &o) : owner(o) {}
+	
+	// Assignment triggers a callback to the original source (owner)
+	index_ref &operator=(const T &value) {
+		owner.inject(concat(value, static_indexing { T::underlying, index, iop::store }));
+		return *this;
+	}
+
+	// Constant value retrieval
+	operator T() const {
+		return concat(owner, static_indexing { T::underlying, index, iop::fetch });
+	}
+};
+
+// Unit types
+struct f32 : stream {
+	static constexpr glsl underlying = glsl::tFloat;
+
+	f32(const stream &s = {}) : stream(s) {}
+
+	// GLSL constructors
+	f32(float x) : f32 {
+		concat_args(instruction(x), constructor_for <f32, 1> ())
+	} {}
+};
+
 // Vector types
 struct vec2 : stream {
-	using stream::stream;
 	static constexpr glsl underlying = glsl::tVec2;
-	vec2(const stream &s) : stream(s) {}
+
+	vec2(const stream &s = {}) : stream(s) {}
 };
 
 struct vec3 : stream {
-	using stream::stream;
 	static constexpr glsl underlying = glsl::tVec3;
-	vec3(const stream &s) : stream(s) {}
+
+	vec3(const stream &s = {}) : stream(s) {}
 };
 
 struct vec4 : stream {
-	using stream::stream;
-
 	static constexpr glsl underlying = glsl::tVec4;
 
-	vec4(const stream &s) : stream { s } {}
-	vec4(const vec3 &v, float x) : stream {
+	index_ref <vec4, f32, 0> x;
+	index_ref <vec4, f32, 1> y;
+	index_ref <vec4, f32, 2> z;
+	index_ref <vec4, f32, 3> w;
+
+	// Adapting from existing streams
+	vec4(const stream &s = {}) : stream(s),
+			x(*this), y(*this),
+			z(*this), w(*this) {}
+
+	// GLSL constructors
+	vec4(const vec3 &v, float x) : vec4 {
 		concat_args(v, x, constructor_for <vec4, 2> ())
 	} {}
+
+	vec4(float x, float y, float z, float w) : vec4 {
+		concat_args(x, y, z, w, constructor_for <vec4, 4> ())
+	} {}
+
+	// Callback
+	void inject(const stream &S) {
+		insert(end(), S.begin(), S.end());
+	}
 };
 
 // Matrix types
@@ -175,11 +240,11 @@ struct in_layout {
 	static constexpr shader_io_type io_type = eInput | eLayout;
 
 	operator T() const {
-		return stream { fetch_layout { T::underlying, binding } };
+		return stream { shader_layout { T::underlying, binding, iop::fetch } };
 	}
 
 	static constexpr T fetch() {
-		return stream { fetch_layout { T::underlying, binding } };
+		return stream { shader_layout { T::underlying, binding, iop::fetch } };
 	}
 };
 
@@ -190,10 +255,17 @@ struct out_layout : stream {
 	static constexpr shader_io_type io_type = eOutput | eLayout;
 
 	out_layout &operator=(const T &value) {
-		*this = concat(value, stash_layout { T::underlying, binding });
+		stream S = concat(value, shader_layout { T::underlying, binding, iop::store });
+		insert(begin(), S.begin(), S.end());
 		return *this;
 	}
 };
+
+// Arithmetic operators
+f32 operator+(const f32 &A, const f32 &B)
+{
+	return concat_args(A, B, primitive_operation::add);
+}
 
 vec2 operator+(const vec2 &A, const vec2 &B)
 {
@@ -205,15 +277,40 @@ vec4 operator*(const mat4 &M, const vec4 &A)
 	return concat_args(M, A, primitive_operation::mul);
 }
 
+f32 operator-(const f32 &A, const f32 &B)
+{
+	return concat_args(A, B, primitive_operation::sub);
+}
+
+f32 operator/(const f32 &A, const f32 &B)
+{
+	return concat_args(A, B, primitive_operation::div);
+}
+
+f32 operator-(const f32 &A)
+{
+	return concat_args(A, primitive_operation::uneg);
+}
+
 // Vertex shader outputs
 struct vertex_shader_intrinsics {
-	vec4 gl_Position;
-};
+	static constexpr shader_io_type io_type = eOutput;
 
-// TODO: fragment shader outputs
-template <typename T>
-struct framebuffer_output {
+	// vec4 gl_Position;
+	struct __si_gl_Position : stream {
+		__si_gl_Position &operator=(const vec4 &value) {
+			stream S = concat(value, stash_intrinsic::si_gl_Position);
+			insert(begin(), S.begin(), S.end());
+			return *this;
+		}
+	} gl_Position;
 
+	// TODO: more outputs for extensions?
+
+	operator stream() const {
+		stream S = gl_Position;
+		return S;
+	}
 };
 
 // Push constants
@@ -231,9 +328,14 @@ struct push_constant {
 
 // Automatically generating arguments for the shaders
 template <typename T>
+concept raw_process_io = requires {
+	{ std::decay_t <T> ::io_type } -> std::same_as <const shader_io_type &>;
+};
+
+template <typename T>
 concept process_io = requires {
 	{ std::decay_t <T> ::io_type } -> std::same_as <const shader_io_type &>;
-} || std::is_base_of_v <push_constant, T>;
+} || std::is_base_of_v <push_constant, std::decay_t <T>>;
 
 template <process_io ... Args>
 struct shader_args {
@@ -246,17 +348,26 @@ shader_args <Args...>::value_type
 shader_args <Args...> ::value {};
 
 // Gather single shader elements/outputs
-// TODO: concept for typed...
-template <process_io T>
-stream unit_gather(const T &value)
-{
-	// TODO: note that storage buffers are both output and input
-	if constexpr (T::io_type & eOutput == eOutput) {
-		return (stream) value;
-	}
+template <typename T>
+struct unit_gather {};
 
-	return {};
-}
+template <raw_process_io T>
+struct unit_gather <T> {
+	static stream go(const T &value) {
+		if constexpr ((T::io_type & eOutput) == eOutput)
+			return (stream) value;
+
+		return {};
+	}
+};
+
+template <typename T>
+requires std::is_base_of_v <push_constant, std::decay_t <T>>
+struct unit_gather <T> {
+	static stream go(const T &value) {
+		return {};
+	}
+};
 
 // Gathering shader code from output types
 template <size_t I, process_io ... Args>
@@ -269,7 +380,7 @@ stream gather(typename shader_args <Args...> ::value_type args)
 		// End of processing
 		return G;
 	} else {
-		stream A = unit_gather <std::tuple_element_t <I, T>> (std::get <I> (args));
+		stream A = unit_gather <std::tuple_element_t <I, T>> ::go(std::get <I> (args));
 		stream B = gather <I + 1, Args...> (args);
 		return concat(A, B);
 	}
@@ -282,6 +393,7 @@ stream gather(typename shader_args <Args...> ::value_type args)
 template <process_io ... Args>
 void compile(void (*ftn)(Args... ))
 {
+	fmt::print("\ncompiling shader\n");
 	auto args = shader_args <Args...> ::value;
 	std::apply(ftn, args);
 	stream S = gather <0, Args...> (args);
@@ -290,6 +402,18 @@ void compile(void (*ftn)(Args... ))
 }
 
 // Formatting
+auto format_as(const iop t)
+{
+	switch (t) {
+	case iop::fetch:
+		return "fetch";
+	case iop::store:
+		return "store";
+	}
+
+	return "?";
+}
+
 auto format_as(const glsl t)
 {
 	switch (t) {
@@ -315,8 +439,14 @@ auto format_as(const primitive_operation &primop)
 	switch (primop) {
 	case primitive_operation::add:
 		return "add";
+	case primitive_operation::sub:
+		return "sub";
 	case primitive_operation::mul:
 		return "mul";
+	case primitive_operation::div:
+		return "div";
+	case primitive_operation::uneg:
+		return "uneg";
 	}
 
 	return "?";
@@ -328,8 +458,12 @@ std::string format_as(const instruction &I)
 		return format_as(*value);
 	}
 
-	if (auto value = I.grab <fetch_layout> ()) {
-		return fmt::format("fetch_layout <{}, {}>", value->type, value->binding);
+	if (auto value = I.grab <shader_layout> ()) {
+		return fmt::format("shader_layout <{}, {}, {}>", value->type, value->binding, value->fs);
+	}
+	
+	if (auto value = I.grab <stash_intrinsic> ()) {
+		return fmt::format("stash_instrinsic");
 	}
 	
 	if (auto value = I.grab <fetch_push_constants> ()) {
@@ -338,6 +472,10 @@ std::string format_as(const instruction &I)
 	
 	if (auto value = I.grab <constructor> ()) {
 		return fmt::format("constructor <{}, {}>", value->type, value->nargs);
+	}
+	
+	if (auto value = I.grab <static_indexing> ()) {
+		return fmt::format("index (static) <{}, {}, {}>", value->original, value->index, value->fs);
 	}
 	
 	if (auto value = I.grab <float> ()) {
@@ -351,12 +489,12 @@ std::string format_as(const stream &s)
 {
 	std::string str = "";
 	for (uint32_t i = 0; i < s.size(); i++) {
-		str += fmt::format("{}", s[i]);
+		str += fmt::format("    {}", s[i]);
 		if (i + 1 < s.size())
-			str += ", ";
+			str += "\n";
 	}
 
-	return "{" + str + "}";
+	return "\n{\n" + str + "\n}";
 }
 
 template <typename T>
@@ -382,13 +520,6 @@ struct mvp : push_constant {
 	}
 };
 
-void shader(const in_layout <vec3, 0> &I0, out_layout <vec3, 0> &O0)
-{
-	fmt::print("in 0: {}\n", I0);
-	fmt::print("out 0: {}\n", O0);
-	// fmt::print("push constants: {}, {}, {}\n", pc.model, pc.view, pc.proj);
-}
-
 void vertex_shader
 (
 	// Shader inputs
@@ -408,16 +539,15 @@ void vertex_shader
 
 	vec4 appended = vec4(position, 1);
 	vec4 projected = pc.proj * pc.view * pc.model * vec4(position, 1);
+	projected.y = -projected.y;
+	projected.z = (projected.z + projected.w) / 2.0f;
 
-	fmt::print("projeceted: {}\n", projected);
-	
 	M.gl_Position = projected;
 }
 
-void fragment_shader(const in_layout <vec2, 0> &p, const in_layout <vec2, 1> &q)
+void fragment_shader(out_layout <vec4, 0> &fragment)
 {
-	vec2 r = p + q;
-	fmt::print("r: {}\n", r);
+	fragment = vec4 { 1, 0, 0, 0 };
 }
 
 }
@@ -426,21 +556,6 @@ int main()
 {
 	using namespace cppsl;
 	
-	in_layout <vec2, 0> p;
-	in_layout <vec2, 1> q;
-
-	shaders::fragment_shader(p, q);
-	
-	in_layout <vec3, 0> i0;
-	in_layout <vec3, 1> i1;
-
-	shaders::mvp pc;
-
-	vertex_shader_intrinsics M;
-
-	out_layout <vec2, 0> o0;
-
-	shaders::vertex_shader(i0, i1, pc, M, o0);
-
-	compile(shaders::shader);
+	compile(shaders::fragment_shader);
+	compile(shaders::vertex_shader);
 }

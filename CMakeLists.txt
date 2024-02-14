@@ -11,5 +11,5 @@ set(CMAKE_CXX_STANDARD 20)
 
 add_executable(main main.cpp)
 
-target_compile_options(main PRIVATE -fconcepts-diagnostics-depth=4)
+target_compile_options(main PRIVATE -Wall -fconcepts-diagnostics-depth=4)
 target_link_libraries(main fmt::fmt)
