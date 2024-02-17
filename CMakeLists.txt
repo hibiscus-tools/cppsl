@@ -9,7 +9,9 @@ FetchContent_MakeAvailable(fmt)
 
 set(CMAKE_CXX_STANDARD 20)
 
-add_executable(main main.cpp)
+include_directories(${CMAKE_SOURCE_DIR}/include)
+
+add_executable(main source/main.cpp source/format.cpp source/stream.cpp)
 
 target_compile_options(main PRIVATE -Wall -fconcepts-diagnostics-depth=4)
 target_link_libraries(main fmt::fmt)

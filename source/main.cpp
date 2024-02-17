@@ -4,149 +4,32 @@
 #include <vector>
 #include <optional>
 #include <functional>
+#include <unordered_set>
 
 #include <fmt/core.h>
-#include <fmt/format.h>
+
+#include "instruction.hpp"
+#include "stream.hpp"
+#include "format.hpp"
 
 namespace cppsl {
 
-// Using runtime generation (JIT)
-// TODO: convert to petal trees for optimization
+// Static variables
+tracking_system tracking;
 
-enum glsl : uint64_t {
-	tFloat,
-	tVec2,
-	tVec3,
-	tVec4,
-	tMat3,
-	tMat4
-};
-
-enum shader_io_type : uint64_t {
-	eInput = 0,
-	eOutput = 1,
-	eLayout = 1 << 2
-};
-
-constexpr shader_io_type operator|(shader_io_type A, shader_io_type B)
-{
-	return shader_io_type((uint64_t) A |  (uint64_t) B);
-}
-
-enum class primitive_operation {
-	add, sub, mul, div,
-	uneg
-};
-
-enum class iop {
-	fetch,
-	store
-};
-
-// TODO: add a bool to reflect fetch or set
-struct shader_layout {
-	glsl    type;
-	int32_t binding;
-	iop     fs;
-};
-
-// TODO: also fetch instrincs
-enum class stash_intrinsic {
-	si_gl_Position
-};
-
-struct fetch_push_constants {
-	glsl    type;
-	int32_t location;
-};
-
-struct constructor {
-	glsl    type;
-	int32_t nargs;
-};
-
-template <typename T, size_t N>
-constructor constructor_for()
-{
-	return { T::underlying, N };
-}
-
-struct static_indexing {
-	glsl     original;
-	uint32_t index;
-	iop      fs;    // either fetch or set
-};
-
-using instruction_base = std::variant <
-	primitive_operation,
-	shader_layout,
-	stash_intrinsic,
-	fetch_push_constants,
-	constructor,
-	static_indexing,
-	float,
-	int32_t
->;
-
-struct instruction : instruction_base {
-	using instruction_base::instruction_base;
-
-	template <typename T>
-	bool holds() const {
-		return std::holds_alternative <T> (*this);
-	}
-
-	template <typename T>
-	std::optional <T> grab() const {
-		if (holds <T> ())
-			return std::get <T> (*this);
-		
-		return std::nullopt;
-	}
-};
-
-using stream = std::vector <instruction>;
-
-stream concat(const stream &A, const stream &B)
-{
-	stream C;
-	C.insert(C.begin(), A.begin(), A.end());
-	C.insert(C.end(), B.begin(), B.end());
-	return C;
-}
-
-stream concat(const stream &A, const instruction &I)
-{
-	stream C;
-	C.insert(C.begin(), A.begin(), A.end());
-	C.push_back(I);
-	return C;
-}
-
-stream concat(const instruction &I, const stream &A)
-{
-	stream C;
-	C.push_back(I);
-	C.insert(C.end(), A.begin(), A.end());
-	return C;
-}
+// Establishing vector types via inheritance
+struct scalar_base {};
+struct vector_base {};
+struct matrix_base {};
 
 template <typename T>
-concept streamable = std::is_base_of_v <stream, T> || std::is_convertible_v <T, instruction>;
+concept scalar_type = std::is_base_of_v <scalar_base, T> || std::is_arithmetic_v <T>;
 
-template <streamable T, streamable ... Args>
-stream concat_args(const T &streamer, const Args &... args)
-{
-	if constexpr (sizeof...(Args)) {
-		auto half = concat_args(args...);
-		return concat(streamer, half);
-	} else {
-		if constexpr (std::is_base_of_v <stream, T>)
-			return streamer;
-		else
-			return { streamer };
-	}
-}
+template <typename T>
+concept vector_type = std::is_base_of_v <vector_base, T>;
+
+template <typename T>
+concept matrix_type = std::is_base_of_v <matrix_base, T>;
 
 // Indexer types
 // TODO: single for now
@@ -170,7 +53,75 @@ struct index_ref {
 };
 
 // Unit types
-struct f32 : stream {
+struct injection_promise {
+	~injection_promise() {
+		stream S = { branch_trigger::end() };
+		tracking.inject(S, nullptr);
+
+		// Removing degenerate ones
+		for (stream *Sp : tracking.active) {
+			stream &S = *Sp;
+			// assert(S->size() >= 2);
+			size_t len = S.size();
+			if (auto value = S[len - 2].grab <branch_trigger> ()) {
+				if (value->type == branch_trigger::eCondition) {
+					auto start = std::find_if(S.rbegin(), S.rend(),
+						[](const instruction &I) {
+							if (auto value = I.grab <branch_trigger> ())
+								return value->type == branch_trigger::eBegin;
+							
+							return false;
+						}
+					);
+
+					auto last = S.begin() + std::distance(S.begin(), start.base()) - 1;
+					S.erase(last, S.end());
+				}
+			}
+		}
+	}
+
+	operator bool() const {
+		return true;
+	}
+};
+
+struct boolean : stream {
+	static constexpr glsl underlying = glsl::tBool;
+
+	enum {
+		eIf, eElseIf, eElse
+	} type = eIf;
+	
+	boolean(auto t) : type(t) {}
+
+	boolean &as(auto t) {
+		type = t;
+		return *this;
+	}
+
+	// From an existing stream
+	boolean(const stream &s = {}) : stream(s) {}
+
+	// GLSL constructors
+	boolean(bool x) : boolean {
+		concat_args(instruction(x), constructor_for <boolean, 1> ())
+	} {}
+
+	// Injects the evaluation into exists thread variables
+	injection_promise inject() const {
+		// Create a tagged expression that indicates which expression
+		// was checked for the branch
+		stream S = *this;
+		S.insert(S.begin(), branch_trigger::begin());
+		S.push_back(branch_trigger::cond());
+		fmt::print("branch injecting S = {}\n", S);
+		tracking.inject(S, this);
+		return {};
+	}
+};
+
+struct f32 : stream, vector_base, scalar_base {
 	static constexpr glsl underlying = glsl::tFloat;
 
 	f32(const stream &s = {}) : stream(s) {}
@@ -182,19 +133,19 @@ struct f32 : stream {
 };
 
 // Vector types
-struct vec2 : stream {
+struct vec2 : stream, vector_base {
 	static constexpr glsl underlying = glsl::tVec2;
 
 	vec2(const stream &s = {}) : stream(s) {}
 };
 
-struct vec3 : stream {
+struct vec3 : stream, vector_base {
 	static constexpr glsl underlying = glsl::tVec3;
 
 	vec3(const stream &s = {}) : stream(s) {}
 };
 
-struct vec4 : stream {
+struct vec4 : stream, vector_base {
 	static constexpr glsl underlying = glsl::tVec4;
 
 	index_ref <vec4, f32, 0> x;
@@ -223,13 +174,13 @@ struct vec4 : stream {
 };
 
 // Matrix types
-struct mat3 : stream {
+struct mat3 : stream, matrix_base {
 	using stream::stream;
 	static constexpr glsl underlying = glsl::tMat3;
 	mat3(const stream &s) : stream(s) {}
 };
 
-struct mat4 : stream {
+struct mat4 : stream, matrix_base {
 	using stream::stream;
 	static constexpr glsl underlying = glsl::tMat4;
 	mat4(const stream &s) : stream(s) {}
@@ -248,15 +199,16 @@ struct in_layout {
 	}
 };
 
-template <typename T, size_t binding>
-struct out_layout : stream {
-	using stream::stream;
+template <vector_type T, size_t binding>
+struct out_layout : T {
+	using T::T;
 	
 	static constexpr shader_io_type io_type = eOutput | eLayout;
 
 	out_layout &operator=(const T &value) {
+		this->clear();
 		stream S = concat(value, shader_layout { T::underlying, binding, iop::store });
-		insert(begin(), S.begin(), S.end());
+		this->insert(this->begin(), S.begin(), S.end());
 		return *this;
 	}
 };
@@ -272,11 +224,6 @@ vec2 operator+(const vec2 &A, const vec2 &B)
 	return concat_args(A, B, primitive_operation::add);
 }
 
-vec4 operator*(const mat4 &M, const vec4 &A)
-{
-	return concat_args(M, A, primitive_operation::mul);
-}
-
 f32 operator-(const f32 &A, const f32 &B)
 {
 	return concat_args(A, B, primitive_operation::sub);
@@ -287,9 +234,41 @@ f32 operator/(const f32 &A, const f32 &B)
 	return concat_args(A, B, primitive_operation::div);
 }
 
+boolean operator>(const f32 &A, const f32 &B)
+{
+	return concat_args(A, B, primitive_operation::cmp_gt);
+}
+
 f32 operator-(const f32 &A)
 {
 	return concat_args(A, primitive_operation::uneg);
+}
+
+// Multiplication
+template <typename A>
+requires vector_type <A> || matrix_type <A>
+A operator*(const A &x, const A &y)
+{
+	return concat_args(x, y, primitive_operation::mul);
+}
+
+// Heterogenous
+template <matrix_type A, vector_type B>
+B operator*(const A &x, const B &y)
+{
+	return concat_args(x, y, primitive_operation::mul);
+}
+
+template <vector_type A, scalar_type B>
+A operator*(const A &x, const B &y)
+{
+	return concat_args(x, y, primitive_operation::mul);
+}
+
+template <vector_type A, scalar_type B>
+A operator*(const B &x, const A &y)
+{
+	return concat_args(x, y, primitive_operation::mul);
 }
 
 // Vertex shader outputs
@@ -297,8 +276,9 @@ struct vertex_shader_intrinsics {
 	static constexpr shader_io_type io_type = eOutput;
 
 	// vec4 gl_Position;
-	struct __si_gl_Position : stream {
+	struct __si_gl_Position : vec4 {
 		__si_gl_Position &operator=(const vec4 &value) {
+			clear();
 			stream S = concat(value, stash_intrinsic::si_gl_Position);
 			insert(begin(), S.begin(), S.end());
 			return *this;
@@ -401,109 +381,6 @@ void compile(void (*ftn)(Args... ))
 	// TODO: warn on empty shaders
 }
 
-// Formatting
-auto format_as(const iop t)
-{
-	switch (t) {
-	case iop::fetch:
-		return "fetch";
-	case iop::store:
-		return "store";
-	}
-
-	return "?";
-}
-
-auto format_as(const glsl t)
-{
-	switch (t) {
-	case tFloat:
-		return "float";
-	case tVec2:
-		return "vec2";
-	case tVec3:
-		return "vec3";
-	case tVec4:
-		return "vec4";
-	case tMat3:
-		return "mat3";
-	case tMat4:
-		return "mat4";
-	}
-
-	return "?";
-}
-
-auto format_as(const primitive_operation &primop)
-{
-	switch (primop) {
-	case primitive_operation::add:
-		return "add";
-	case primitive_operation::sub:
-		return "sub";
-	case primitive_operation::mul:
-		return "mul";
-	case primitive_operation::div:
-		return "div";
-	case primitive_operation::uneg:
-		return "uneg";
-	}
-
-	return "?";
-}
-
-std::string format_as(const instruction &I)
-{
-	if (auto value = I.grab <primitive_operation> ()) {
-		return format_as(*value);
-	}
-
-	if (auto value = I.grab <shader_layout> ()) {
-		return fmt::format("shader_layout <{}, {}, {}>", value->type, value->binding, value->fs);
-	}
-	
-	if (auto value = I.grab <stash_intrinsic> ()) {
-		return fmt::format("stash_instrinsic");
-	}
-	
-	if (auto value = I.grab <fetch_push_constants> ()) {
-		return fmt::format("fetch_push_constants <{}, {}>", value->type, value->location);
-	}
-	
-	if (auto value = I.grab <constructor> ()) {
-		return fmt::format("constructor <{}, {}>", value->type, value->nargs);
-	}
-	
-	if (auto value = I.grab <static_indexing> ()) {
-		return fmt::format("index (static) <{}, {}, {}>", value->original, value->index, value->fs);
-	}
-	
-	if (auto value = I.grab <float> ()) {
-		return fmt::to_string(*value);
-	}
-
-	return "<?>";
-}
-
-std::string format_as(const stream &s)
-{
-	std::string str = "";
-	for (uint32_t i = 0; i < s.size(); i++) {
-		str += fmt::format("    {}", s[i]);
-		if (i + 1 < s.size())
-			str += "\n";
-	}
-
-	return "\n{\n" + str + "\n}";
-}
-
-template <typename T>
-requires streamable <T>
-auto format_as(const T &t)
-{
-	return format_as(stream(t));
-}
-
 }
 
 namespace shaders {
@@ -545,9 +422,28 @@ void vertex_shader
 	M.gl_Position = projected;
 }
 
+#define sl_if(X) if ((X).inject())
+#define sl_elif(X) if ((X).as(boolean::eElseIf).inject())
+#define sl_else(X) if (boolean(boolean::eElse).inject())
+
 void fragment_shader(out_layout <vec4, 0> &fragment)
 {
+	f32 x = 1.0f;
+	fmt::print("fragment after: {}\n", fragment);
+
 	fragment = vec4 { 1, 0, 0, 0 };
+	sl_if(x > 0.5f) {
+	}
+	
+	sl_elif(x > 0.5f) {
+		
+	}
+	
+	sl_else(x > 0.5f) {
+		// fragment.y = 4.0f * x;
+	}
+
+	fmt::print("end fragment {}\n", fragment);
 }
 
 }
@@ -557,5 +453,5 @@ int main()
 	using namespace cppsl;
 	
 	compile(shaders::fragment_shader);
-	compile(shaders::vertex_shader);
+	// compile(shaders::vertex_shader);
 }
