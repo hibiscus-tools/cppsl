@@ -80,7 +80,7 @@ int main()
 	layout_output <vec4, 0> fragment;
 	fragment_shader(fragment);
 
-	auto vsource = translate_vertex_shader(vintr);
+	auto vsource = translate_vertex_shader(vintr, {});
 	fmt::println("vertex source:\n{}", vsource);
 
 	auto fsource = translate_fragment_shader(fragment);

@@ -5,25 +5,34 @@
 
 // GLSL Operations/Annotations
 enum gloa : int {
+	// Read and write operations
 	eConstruct, eIndex, eComponent,
 
-	eInt32, eFloat32, eVec2, eVec3, eVec4,
+	// Types
+	eNone, eInt32, eFloat32, eVec2, eVec3, eVec4,
 
+	// Shader inputs and outputs
 	eLayoutInput,
 	eLayoutOutput,
 
-	eAdd, eSub, eMul, eDiv
+	// Arithmetic
+	eAdd, eSub, eMul, eDiv,
+
+	// Instrinsics
+	eGlPosition
 };
 
 static constexpr const char *GLOA_STRINGS[] {
 	"Construct", "Index", "Component",
 
-	"Int32", "Float32", "Vec2", "Vec3", "Vec4",
+	"None", "Int32", "Float32", "Vec2", "Vec3", "Vec4",
 
 	"LayoutInput",
 	"LayoutOutput",
 
-	"Add", "Sub", "Mul", "Div"
+	"Add", "Sub", "Mul", "Div",
+
+	"gl_Position"
 };
 
 // GLSL Intermediate Representation (atom)

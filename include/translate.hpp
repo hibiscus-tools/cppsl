@@ -15,11 +15,18 @@ struct identifier {
 	std::string postfix; // Only for arrays, components, etc.
 
 	std::string full_id() const {
+		if (type == eNone)
+			return prefix + postfix;
+
 		return prefix + std::to_string(id) + postfix;
 	}
 
 	static identifier from(gloa type, int &generator) {
 		return { type, "_v", generator++ };
+	}
+
+	static identifier builtin_from(const std::string &prefix) {
+		return { eNone, prefix };
 	}
 };
 
@@ -33,6 +40,10 @@ struct statement {
 
 	static statement from(gloa type, const std::string &source, int &generator) {
 		return { identifier::from(type, generator), source };
+	}
+
+	static statement builtin_from(const std::string &prefix, const std::string &source) {
+		return { identifier::builtin_from(prefix), source };
 	}
 };
 
@@ -48,15 +59,15 @@ struct unt_layout_output {
 // TODO: support multi output programs
 namespace detail {
 
-std::string translate_vertex_shader(const intrinsics::vertex &);
+std::string translate_vertex_shader(const intrinsics::vertex &, const std::vector <unt_layout_output> &);
 std::string translate_fragment_shader(const unt_layout_output &);
 
 }
 
 // TODO: template
-inline std::string translate_vertex_shader(const intrinsics::vertex &vintr)
+inline std::string translate_vertex_shader(const intrinsics::vertex &vintr, const std::vector <unt_layout_output> &louts)
 {
-	return detail::translate_vertex_shader(vintr);
+	return detail::translate_vertex_shader(vintr, louts);
 }
 
 template <typename T, int N>

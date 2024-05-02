@@ -8,6 +8,8 @@
 inline std::string gloa_type_string(gloa x)
 {
 	switch (x) {
+	case eNone:
+		return "";
 	case eFloat32:
 		return "float";
 	case eVec2:
@@ -61,6 +63,10 @@ inline std::string format_as(const gir_tree &gt, size_t indent = 0)
 
 inline std::string format_as(const statement &s)
 {
+	std::string type = gloa_type_string(s.loc.type);
+	if (type.empty())
+		return s.loc.full_id() + " = " + s.source + ";";
+
 	return gloa_type_string(s.loc.type) + " " + s.loc.full_id() + " = " + s.source + ";";
 }
 

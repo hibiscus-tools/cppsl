@@ -114,6 +114,15 @@ struct vec3 : gir_tree {
 
 	vec3(const gir_tree &gt) : gir_tree(gt) {}
 
+	// Copies need some care
+	vec3(const vec3 &v) : gir_tree(v) {}
+
+	vec3 operator=(const vec3 &v) {
+		if (this != &v)
+			gir_tree::operator=(v);
+		return *this;
+	}
+
 	vec3(float x = 0.0f, float y = 0.0f, float z = 0.0f) : gir_tree {
 		gir_tree::cfrom(eConstruct, {
 			gir_tree::cfrom(eVec3),
@@ -203,6 +212,12 @@ struct layout_input {
 template <typename T, int Binding>
 struct layout_output : T {
 	using T::T;
+
+	template <typename A>
+	layout_output &operator=(const A &v) {
+		T::operator=(v);
+		return *this;
+	}
 };
 
 namespace intrinsics {
