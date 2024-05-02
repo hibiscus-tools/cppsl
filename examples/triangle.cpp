@@ -1,0 +1,178 @@
+#include <littlevk/littlevk.hpp>
+
+#include <cppsl.hpp>
+
+// Vertex buffer; position (2)
+constexpr float triangles[][2] {
+	{  0.0f, -0.5f },
+	{  0.5f,  0.5f },
+	{ -0.5f,  0.5f },
+};
+
+
+void vertex_shader(const layout_input <vec2, 0> &position, intrinsics::vertex &vintr)
+{
+	vintr.gl_Position = vec4(position, 0, 1);
+}
+
+void fragment_shader(layout_output <vec4, 0> &fragment)
+{
+	fragment = vec4(1, 0, 1, 1);
+	fragment.x = 0.5;
+}
+
+int main()
+{
+	// Vulkan device extensions
+	static const std::vector <const char *> EXTENSIONS {
+		VK_KHR_SWAPCHAIN_EXTENSION_NAME
+	};
+
+	// Load Vulkan physical device
+	auto predicate = [](const vk::PhysicalDevice &dev) {
+		return littlevk::physical_device_able(dev, EXTENSIONS);
+	};
+
+	vk::PhysicalDevice phdev = littlevk::pick_physical_device(predicate);
+	vk::PhysicalDeviceMemoryProperties memory_properties = phdev.getMemoryProperties();
+
+	// Create an application skeleton with the bare minimum
+	littlevk::Skeleton app;
+	app.skeletonize(phdev, { 800, 600 }, "Hello Triangle", EXTENSIONS);
+
+	// Create a deallocator for automatic resource cleanup
+	auto deallocator = new littlevk::Deallocator { app.device };
+
+	// Create a render pass
+	vk::RenderPass render_pass = littlevk::RenderPassAssembler(app.device, deallocator)
+		.add_attachment(littlevk::default_color_attachment(app.swapchain.format))
+		.add_subpass(vk::PipelineBindPoint::eGraphics)
+			.color_attachment(0, vk::ImageLayout::eColorAttachmentOptimal)
+			.done();
+
+	// Create framebuffers from the swapchain
+	littlevk::FramebufferGenerator generator(app.device, render_pass, app.window->extent, deallocator);
+	for (const auto &view : app.swapchain.image_views)
+		generator.add(view);
+
+	std::vector <vk::Framebuffer> framebuffers = generator.unpack();
+
+	// Allocate command buffers
+	vk::CommandPool command_pool = littlevk::command_pool(app.device,
+		vk::CommandPoolCreateInfo {
+			vk::CommandPoolCreateFlagBits::eResetCommandBuffer,
+			littlevk::find_graphics_queue_family(phdev)
+		}
+	).unwrap(deallocator);
+
+	auto command_buffers = app.device.allocateCommandBuffers
+		({ command_pool, vk::CommandBufferLevel::ePrimary, 2 });
+
+	// Allocate triangle vertex buffer
+	littlevk::Buffer vertex_buffer = littlevk::bind(app.device, memory_properties, deallocator)
+		.buffer(triangles, sizeof(triangles), vk::BufferUsageFlagBits::eVertexBuffer);
+
+	// Create a graphics pipeline
+	layout_input <vec2, 0> position;
+	intrinsics::vertex vintr;
+	vertex_shader(position, vintr);
+
+	layout_output <vec4, 0> fragment;
+	fragment_shader(fragment);
+
+	auto vsource = translate_vertex_shader(vintr);
+	fmt::println("vertex source:\n{}", vsource);
+
+	auto fsource = translate_fragment_shader(fragment);
+	fmt::println("fragment source:\n{}", fsource);
+
+	auto vertex_layout = littlevk::VertexLayout <littlevk::rg32f> ();
+
+	auto bundle = littlevk::ShaderStageBundle(app.device, deallocator)
+		.attach(vsource, vk::ShaderStageFlagBits::eVertex)
+		.attach(fsource, vk::ShaderStageFlagBits::eFragment);
+
+	littlevk::Pipeline ppl = littlevk::PipelineAssembler(app.device, app.window, deallocator)
+		.with_render_pass(render_pass, 0)
+		.with_vertex_layout(vertex_layout)
+		.with_shader_bundle(bundle);
+
+	// Syncronization primitives
+	auto sync = littlevk::present_syncronization(app.device, 2).unwrap(deallocator);
+
+	auto resize = [&]() {
+		app.resize();
+
+		// We can use the same generator; unpack() clears previously made framebuffers
+		generator.extent = app.window->extent;
+		for (const auto &view : app.swapchain.image_views)
+			generator.add(view);
+
+		framebuffers = generator.unpack();
+	};
+
+	// TODO: text render framerate
+	// Render loop
+        uint32_t frame = 0;
+        while (true) {
+                glfwPollEvents();
+                if (glfwWindowShouldClose(app.window->handle))
+                        break;
+
+		littlevk::SurfaceOperation op;
+                op = littlevk::acquire_image(app.device, app.swapchain.swapchain, sync[frame]);
+		if (op.status == littlevk::SurfaceOperation::eResize) {
+			resize();
+			continue;
+		}
+
+		// Start the render pass
+		const auto &cmd = command_buffers[frame];
+		cmd.begin(vk::CommandBufferBeginInfo {});
+
+		// Set viewport and scissor
+		littlevk::viewport_and_scissor(cmd, littlevk::RenderArea(app.window));
+
+		const auto &rpbi = littlevk::default_rp_begin_info <1>
+			(render_pass, framebuffers[op.index], app.window);
+
+		cmd.beginRenderPass(rpbi, vk::SubpassContents::eInline);
+
+		// Render the triangle
+		cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, ppl.handle);
+		cmd.bindVertexBuffers(0, vertex_buffer.buffer, { 0 });
+		cmd.draw(3, 1, 0, 0);
+
+		cmd.endRenderPass();
+		cmd.end();
+
+		// Submit command buffer while signaling the semaphore
+		constexpr vk::PipelineStageFlags wait_stage = vk::PipelineStageFlagBits::eColorAttachmentOutput;
+
+		vk::SubmitInfo submit_info {
+			sync.image_available[frame],
+			wait_stage, cmd,
+			sync.render_finished[frame]
+		};
+
+		app.graphics_queue.submit(submit_info, sync.in_flight[frame]);
+
+                op = littlevk::present_image(app.present_queue, app.swapchain.swapchain, sync[frame], op.index);
+		if (op.status == littlevk::SurfaceOperation::eResize)
+			resize();
+
+		frame = 1 - frame;
+        }
+
+	// Finish all pending operations
+	app.device.waitIdle();
+
+	// Free resources using automatic deallocator
+	delete deallocator;
+
+        // Delete application
+	app.destroy();
+
+	// TODO: address santizer to check leaks...
+        return 0;
+}

@@ -5,8 +5,7 @@
 
 // GLSL Operations/Annotations
 enum gloa : int {
-	eFetch, eFetchArray, eStore, eStoreArray,
-	eConstruct, eComponent,
+	eConstruct, eIndex, eComponent,
 
 	eInt32, eFloat32, eVec2, eVec3, eVec4,
 
@@ -17,8 +16,7 @@ enum gloa : int {
 };
 
 static constexpr const char *GLOA_STRINGS[] {
-	"Fetch", "FetchArray", "Store", "StoreArray",
-	"Construct", "Component",
+	"Construct", "Index", "Component",
 
 	"Int32", "Float32", "Vec2", "Vec3", "Vec4",
 
@@ -43,64 +41,16 @@ struct gir_tree {
 	std::vector <gir_tree> children;
 
 	// Replace contents
-	void rehash(gir_t data_, bool cexpr_, const std::vector <gir_tree> &children_) {
-		data = data_;
-		cexpr = cexpr_;
-		children = children_;
-	}
+	void rehash(gir_t, bool, const std::vector <gir_tree> &);
 
-	// Single element construction
-	static gir_tree from(gir_t data, bool cexpr) {
-		return {
-			.data = data,
-			.cexpr = cexpr,
-			.children = {}
-		};
-	}
+	static gir_tree from(gir_t, bool);
+	static gir_tree from(gir_t, bool, const std::vector <gir_tree> &);
 
-	// With children
-	static gir_tree from(gir_t data, bool cexpr, const std::vector <gir_tree> &children) {
-		return {
-			.data = data,
-			.cexpr = cexpr,
-			.children = children
-		};
-	}
+	static gir_tree cfrom(gir_t);
+	static gir_tree cfrom(gir_t, const std::vector <gir_tree> &);
 
-	// Constant alternatives
-	static gir_tree cfrom(gir_t data) {
-		return {
-			.data = data,
-			.cexpr = true,
-			.children = {}
-		};
-	}
-
-	static gir_tree cfrom(gir_t data, const std::vector <gir_tree> &children) {
-		return {
-			.data = data,
-			.cexpr = true,
-			.children = children
-		};
-	}
-
-	// Variable alternatives
-	// TODO: variadics?
-	static gir_tree vfrom(gir_t data) {
-		return {
-			.data = data,
-			.cexpr = false,
-			.children = {}
-		};
-	}
-
-	static gir_tree vfrom(gir_t data, const std::vector <gir_tree> &children) {
-		return {
-			.data = data,
-			.cexpr = false,
-			.children = children
-		};
-	}
+	static gir_tree vfrom(gir_t);
+	static gir_tree vfrom(gir_t, const std::vector <gir_tree> &);
 };
 
 // Performing constant expression simplifications

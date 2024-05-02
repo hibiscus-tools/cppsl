@@ -13,7 +13,7 @@ std::vector <statement> translate_layout_input(const std::vector <gir_tree> &nod
 {
 	gloa type = std::get <gloa> (nodes[0].data);
 	int binding = std::get <int> (nodes[1].data);
-	return { statement::from(type, fmt::format("{}{}", LAYOUT_INPUT_PREFIX, binding), binding) };
+	return { statement::from(type, fmt::format("{}{}", LAYOUT_INPUT_PREFIX, binding), generator) };
 }
 
 std::string function_call(const std::string &ftn, const std::vector <std::string> &args)
@@ -122,7 +122,7 @@ std::string translate_vertex_shader(const intrinsics::vertex &vin)
 	// Fill in the rest of the program
 	std::string code = "#version 450\n";
 	for (auto [type, binding] : used_lib) {
-		code += fmt::format("layout (location = {}) out {} {}{};\n",
+		code += fmt::format("layout (location = {}) in {} {}{};\n",
 			binding, gloa_type_string(type), LAYOUT_INPUT_PREFIX, binding);
 	}
 
