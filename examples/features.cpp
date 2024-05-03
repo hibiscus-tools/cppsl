@@ -1,3 +1,4 @@
+#include <fmt/core.h>
 #include <fmt/printf.h>
 
 #include "cppsl.hpp"
@@ -22,10 +23,11 @@ void vertex_shader
 	out_color = color;
 }
 
-void fragment_shader(layout_output <vec4, 0> &fragment)
+void fragment_shader(layout_output <vec4, 0> &fragment, layout_output <vec4, 1> &ff)
 {
 	fragment = vec4(1, 0, 1, 1);
 	fragment.x = 0.5;
+	ff = vec4();
 }
 
 // NOTE: standard function in GLSL can be treated like objects with an overloaded operator()()
@@ -33,28 +35,11 @@ void fragment_shader(layout_output <vec4, 0> &fragment)
 int main()
 {
 	// TODO: check for conflicting bindings
-	layout_input <vec2, 0> position;
-	layout_input <vec3, 1> color;
-	intrinsics::vertex vintr;
-	layout_output <vec3, 0> out_color;
-
-	vertex_shader(position, color, vintr, out_color);
-
-	fmt::println("\ngl_Position:\n{}", vintr.gl_Position);
-	fmt::println("\nout_color:\n{}", out_color);
-
-	// layout_output <vec4, 0> fragment;
-	//
-	// fragment_shader(fragment);
-	//
-	// fmt::println("fragment: {}", fragment);
-
-	// int generator = 0;
-	// auto source = translate(vintr.gl_Position, generator);
-
-	auto vsource = detail::translate_vertex_shader(vintr, { { eVec3, 0, out_color } });
+	// TODO: check vertex shader compability with vulkan vertex attributes (pass as an extra)
+	auto vsource = translate <Stage::Vertex> (vertex_shader);
 	fmt::println("\nvertex source:\n{}", vsource);
 
-	// auto fsource = translate_fragment_shader(fragment);
-	// fmt::println("fragment source:\n{}", fsource);
+	// TODO: a way to check compability of vertex -> fragment stage (pass vertex shader as an extra)
+	auto fsource = translate <Stage::Fragment> (fragment_shader);
+	fmt::println("\nfragment source:\n{}", fsource);
 }

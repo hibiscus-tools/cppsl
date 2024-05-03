@@ -65,8 +65,10 @@ struct component_ref {
 		cmps.insert(cmps.begin(), gir_tree::cfrom(T::alias::components));
 		cmps.insert(cmps.begin(), gir_tree::cfrom(T::native_type));
 
+		bool cexpr = ref_tree.cexpr & v.cexpr;
+
 		T &tref = ref.get();
-		tref.rehash(eConstruct, ref_tree.cexpr, cmps);
+		tref.rehash(eConstruct, cexpr, cmps);
 
 		return *this;
 	}
@@ -209,6 +211,45 @@ struct layout_input {
 	}
 };
 
+template <int Binding>
+struct layout_input <vec3, Binding> {
+	// TODO: function to generate this,
+	// OR vec3 <Injected> specialization with required injection
+	// and vec3 = vec3 <Regular>
+	const gir_tree x = gir_tree::vfrom(eComponent, {
+		gir_tree::cfrom(0),
+		gir_tree::vfrom(eLayoutInput, {
+			gir_tree::cfrom(eVec3),
+			gir_tree::cfrom(Binding),
+		})
+	});
+
+	const gir_tree y = gir_tree::vfrom(eComponent, {
+		gir_tree::cfrom(1),
+		gir_tree::vfrom(eLayoutInput, {
+			gir_tree::cfrom(eVec3),
+			gir_tree::cfrom(Binding),
+		})
+	});
+
+	const gir_tree z = gir_tree::vfrom(eComponent, {
+		gir_tree::cfrom(2),
+		gir_tree::vfrom(eLayoutInput, {
+			gir_tree::cfrom(eVec3),
+			gir_tree::cfrom(Binding),
+		})
+	});
+
+	layout_input() {}
+
+	operator vec3() const {
+		return gir_tree::vfrom(eLayoutInput, {
+			gir_tree::cfrom(eVec3),
+			gir_tree::cfrom(Binding),
+		});
+	}
+};
+
 template <typename T, int Binding>
 struct layout_output : T {
 	using T::T;
@@ -223,7 +264,7 @@ struct layout_output : T {
 namespace intrinsics {
 
 struct vertex {
-	vec4 gl_Position;
+	vec4 gl_Position = vec4();
 };
 
 }

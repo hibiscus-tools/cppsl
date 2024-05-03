@@ -54,7 +54,7 @@ inline std::string format_as(const gir_tree &gt, size_t indent = 0)
 	if (std::holds_alternative <gloa> (gt.data))
 		variant = "gloa";
 
-	std::string out = fmt::format("{}({:>5s}: {})", tab, variant, gt.data);
+	std::string out = fmt::format("{}({:>5s}: {}: {})", tab, variant, gt.data, gt.cexpr);
 	for (const auto &cgt : gt.children)
 		out += "\n" + format_as(cgt, indent + 4);
 	return out;

@@ -2,23 +2,28 @@
 
 #include <cppsl.hpp>
 
-// Vertex buffer; position (2)
-constexpr float triangles[][2] {
-	{  0.0f, -0.5f },
-	{  0.5f,  0.5f },
-	{ -0.5f,  0.5f },
+// Vertex buffer; position (2) and color (3)
+constexpr float triangles[][5] {
+	{  0.0f, -0.5f, 1.0f, 0.0f, 0.0f },
+	{  0.5f,  0.5f, 0.0f, 1.0f, 0.0f },
+	{ -0.5f,  0.5f, 0.0f, 0.0f, 1.0f },
 };
 
 
-void vertex_shader(const layout_input <vec2, 0> &position, intrinsics::vertex &vintr)
+void vertex_shader(const layout_input <vec2, 0> &position, const layout_input <vec3, 1> &color, intrinsics::vertex &vintr, layout_output <vec3, 0> &out_color)
 {
 	vintr.gl_Position = vec4(position, 0, 1);
+	out_color = color;
 }
 
-void fragment_shader(layout_output <vec4, 0> &fragment)
+void fragment_shader(const layout_input <vec3, 0> &in_color, layout_output <vec4, 0> &fragment)
 {
 	fragment = vec4(1, 0, 1, 1);
-	fragment.x = 0.5;
+	fragment.x = in_color.x;
+	fragment.y = in_color.y;
+	fragment.z = in_color.z;
+
+	fmt::println("fragment: {}", fragment);
 }
 
 int main()
@@ -73,20 +78,13 @@ int main()
 		.buffer(triangles, sizeof(triangles), vk::BufferUsageFlagBits::eVertexBuffer);
 
 	// Create a graphics pipeline
-	layout_input <vec2, 0> position;
-	intrinsics::vertex vintr;
-	vertex_shader(position, vintr);
-
-	layout_output <vec4, 0> fragment;
-	fragment_shader(fragment);
-
-	auto vsource = translate_vertex_shader(vintr, {});
+	auto vsource = translate <Stage::Vertex> (vertex_shader);
 	fmt::println("vertex source:\n{}", vsource);
 
-	auto fsource = translate_fragment_shader(fragment);
+	auto fsource = translate <Stage::Fragment> (fragment_shader);
 	fmt::println("fragment source:\n{}", fsource);
 
-	auto vertex_layout = littlevk::VertexLayout <littlevk::rg32f> ();
+	auto vertex_layout = littlevk::VertexLayout <littlevk::rg32f, littlevk::rgb32f> ();
 
 	auto bundle = littlevk::ShaderStageBundle(app.device, deallocator)
 		.attach(vsource, vk::ShaderStageFlagBits::eVertex)

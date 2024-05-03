@@ -60,7 +60,7 @@ std::string function_call(const std::string &ftn, const std::vector <std::string
 	return out + ")";
 }
 
-// TODO: return the location (identifier) of the stored result, can choose to inline it
+// TODO: inlining certain sources...
 std::vector <statement> translate_construct(const std::vector <gir_tree> &nodes, int &generator)
 {
 	gloa type = std::get <gloa> (nodes[0].data);
@@ -89,6 +89,31 @@ std::vector <statement> translate_construct(const std::vector <gir_tree> &nodes,
 	return {};
 }
 
+static constexpr gloa scalar_type(gloa vector_type)
+{
+	switch (vector_type) {
+	case eVec2:
+	case eVec3:
+	case eVec4:
+		return eFloat32;
+	default:
+		break;
+	}
+
+	return eNone;
+}
+
+std::vector <statement> translate_component(const std::vector <gir_tree> &nodes, int &generator)
+{
+	static const std::string postfixes[] { ".x", ".y", ".z", ".w" };
+	int index = std::get <int> (nodes[0].data);
+	auto statements = translate(nodes[1], generator);
+	statement last = statements.back();
+	statement after = statement::from(scalar_type(last.loc.type), last.full_loc() + postfixes[index], generator);
+	statements.push_back(after);
+	return statements;
+}
+
 std::vector <statement> translate(const gir_tree &gt, int &generator)
 {
 	struct visitor {
@@ -102,6 +127,8 @@ std::vector <statement> translate(const gir_tree &gt, int &generator)
 				return translate_variadic(gt.children, generator);
 			case eConstruct:
 				return translate_construct(gt.children, generator);
+			case eComponent:
+				return translate_component(gt.children, generator);
 			case eLayoutInput:
 				return translate_layout_input(gt.children, generator);
 			case eLayoutOutput:
@@ -170,31 +197,11 @@ std::set <int> used_layout_output_bindings(const gir_tree &gt)
 // TODO: support multi output programs
 namespace detail {
 
-std::string translate_vertex_shader(const intrinsics::vertex &vin, const std::vector <unt_layout_output> &louts)
+// TODO: separate optimization stage
+
+std::string translate_gir_tree(const gir_tree &unified, const std::vector <unt_layout_output> &louts)
 {
-	int generator = 0;
-
-	// Preprocessing; unify all outputs into a single tree
-	std::vector <gir_tree> outputs;
-
-	bool cexpr = true;
-
-	cexpr &= vin.gl_Position.cexpr;
-	outputs.push_back(gir_tree::from(eGlPosition, vin.gl_Position.cexpr, { vin.gl_Position }));
-
-	for (const unt_layout_output &lout : louts) {
-		cexpr &= lout.gt.cexpr;
-		outputs.push_back(gir_tree::from(eLayoutOutput, lout.gt.cexpr, {
-			gir_tree::cfrom(lout.binding),
-			lout.gt
-		}));
-	}
-
-	gir_tree unified = gir_tree::from(eNone, cexpr, outputs);
-
-	fmt::println("unified tree for vertex shader:\n{}", unified);
-
-	// TODO: combine all requirements into a single tree, then optimze the whole thing in one go
+	fmt::println("\nunified tree for shader:\n{}", unified);
 
 	// TODO: create a gir_link_tree
 
@@ -206,6 +213,7 @@ std::string translate_vertex_shader(const intrinsics::vertex &vin, const std::ve
 
 	// Fill in the rest of the program
 	std::string code = "#version 450\n";
+
 	for (auto [type, binding] : used_lib) {
 		code += fmt::format("layout (location = {}) in {} {}{};\n",
 			binding, gloa_type_string(type), LAYOUT_INPUT_PREFIX, binding);
@@ -219,6 +227,7 @@ std::string translate_vertex_shader(const intrinsics::vertex &vin, const std::ve
 
 	code += "void main() {\n";
 
+	int generator = 0;
 	auto statements = translate(unified, generator);
 	for (const statement &s : statements)
 		code += fmt::format("  {}\n", s);
@@ -228,22 +237,114 @@ std::string translate_vertex_shader(const intrinsics::vertex &vin, const std::ve
 	return code;
 }
 
-std::string translate_fragment_shader(const unt_layout_output &fout)
-{
-	int generator = 0;
-	auto statements = translate(fout.gt, generator);
-
-	// Fill in the rest of the program
-	std::string code = "#version 450\n";
-	code += "layout (location = 0) out " + gloa_type_string(fout.type) + " " + LAYOUT_OUTPUT_PREFIX + "0;\n";
-	code += "void main() {\n";
-	for (const statement &s : statements)
-		code += fmt::format("  {}\n", s);
-	// TODO: type checking for the sake of sanity
-	code += "  " + LAYOUT_OUTPUT_PREFIX + "0 = " + statements.back().full_loc() + ";\n";
-	code += "}\n";
-
-	return code;
-}
+// std::string translate_vertex_shader(const intrinsics::vertex &vin, const std::vector <unt_layout_output> &louts)
+// {
+// 	int generator = 0;
+//
+// 	// Preprocessing; unify all outputs into a single tree
+// 	std::vector <gir_tree> outputs;
+//
+// 	bool cexpr = true;
+//
+// 	cexpr &= vin.gl_Position.cexpr;
+// 	outputs.push_back(gir_tree::from(eGlPosition, vin.gl_Position.cexpr, { vin.gl_Position }));
+//
+// 	for (const unt_layout_output &lout : louts) {
+// 		cexpr &= lout.gt.cexpr;
+// 		outputs.push_back(gir_tree::from(eLayoutOutput, lout.gt.cexpr, {
+// 			gir_tree::cfrom(lout.binding),
+// 			lout.gt
+// 		}));
+// 	}
+//
+// 	gir_tree unified = gir_tree::from(eNone, cexpr, outputs);
+//
+// 	fmt::println("\nunified tree for vertex shader:\n{}", unified);
+//
+// 	// TODO: combine all requirements into a single tree, then optimze the whole thing in one go
+//
+// 	// TODO: create a gir_link_tree
+//
+// 	// Grab all used bindings
+// 	auto used_lib = used_layout_input_bindings(unified);
+// 	auto used_lob = used_layout_output_bindings(unified);
+//
+// 	// TODO: also all output bindings
+//
+// 	// Fill in the rest of the program
+// 	std::string code = "#version 450\n";
+//
+// 	for (auto [type, binding] : used_lib) {
+// 		code += fmt::format("layout (location = {}) in {} {}{};\n",
+// 			binding, gloa_type_string(type), LAYOUT_INPUT_PREFIX, binding);
+// 	}
+//
+// 	for (auto binding : used_lob) {
+// 		gloa type = louts[binding].type;
+// 		code += fmt::format("layout (location = {}) out {} {}{};\n",
+// 			binding, gloa_type_string(type), LAYOUT_OUTPUT_PREFIX, binding);
+// 	}
+//
+// 	code += "void main() {\n";
+//
+// 	auto statements = translate(unified, generator);
+// 	for (const statement &s : statements)
+// 		code += fmt::format("  {}\n", s);
+//
+// 	code += "}\n";
+//
+// 	return code;
+// }
+//
+// std::string translate_fragment_shader(const std::vector <unt_layout_output> &louts)
+// {
+// 	int generator = 0;
+//
+// 	// Preprocessing; unify all outputs into a single tree
+// 	std::vector <gir_tree> outputs;
+//
+// 	bool cexpr = true;
+//
+// 	for (const unt_layout_output &lout : louts) {
+// 		cexpr &= lout.gt.cexpr;
+// 		outputs.push_back(gir_tree::from(eLayoutOutput, lout.gt.cexpr, {
+// 			gir_tree::cfrom(lout.binding),
+// 			lout.gt
+// 		}));
+// 	}
+//
+// 	gir_tree unified = gir_tree::from(eNone, cexpr, outputs);
+//
+// 	fmt::println("\nunified tree for fragment shader:\n{}", unified);
+//
+// 	// Grab all used bindings
+// 	auto used_lib = used_layout_input_bindings(unified);
+// 	auto used_lob = used_layout_output_bindings(unified);
+//
+// 	// Fill in the rest of the program
+// 	// TODO: this is a common function
+// 	std::string code = "#version 450\n";
+//
+// 	for (auto [type, binding] : used_lib) {
+// 		code += fmt::format("layout (location = {}) in {} {}{};\n",
+// 			binding, gloa_type_string(type), LAYOUT_INPUT_PREFIX, binding);
+// 	}
+//
+// 	for (auto binding : used_lob) {
+// 		gloa type = louts[binding].type;
+// 		code += fmt::format("layout (location = {}) out {} {}{};\n",
+// 			binding, gloa_type_string(type), LAYOUT_OUTPUT_PREFIX, binding);
+// 	}
+//
+// 	code += "void main() {\n";
+//
+// 	auto statements = translate(unified, generator);
+// 	for (const statement &s : statements)
+// 		code += fmt::format("  {}\n", s);
+//
+// 	code += "}\n";
+//
+// 	return code;
+// }
 
 }

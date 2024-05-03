@@ -1,5 +1,8 @@
 #include <cassert>
 
+#include <fmt/printf.h>
+
+#include "fmt.hpp"
 #include "gir.hpp"
 
 gir_tree ceval_construct(const std::vector <gir_tree> &);
@@ -19,6 +22,7 @@ gir_tree ceval(const gir_tree &gt)
 			return ceval_construct(gt.children);
 			break;
 		case eComponent:
+			fmt::println("CEVAL ON {}", gt);
 			return ceval_component(gt.children);
 			break;
 		default:
