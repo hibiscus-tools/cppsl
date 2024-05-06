@@ -9,8 +9,10 @@
 // NOTE: Constructors for primitive types are simply initializers; the types
 // themself do not contain additional data, only interfaces to it.
 
+struct scalar_type {};
+
 struct f32 : gir_tree {
-	f32(const gir_tree &gt) : gir_tree(gt) {}
+	explicit f32(const gir_tree &gt) : gir_tree(gt) {}
 
 	f32(float x = 0.0f) : gir_tree {
 		gir_tree::cfrom(eConstruct, {
@@ -81,7 +83,7 @@ struct component_ref {
 			ref_tree
 		});
 
-		return ceval(cmp_tree);
+		return vtype(ceval(cmp_tree));
 	}
 };
 
@@ -179,25 +181,53 @@ struct vec4 : gir_tree {
 			gir_tree::cfrom(w)
 		})
 	} {}
+
+	vec4(const vec3 &v, float w = 0.0f) : gir_tree {
+		gir_tree::cfrom(eConstruct, {
+			gir_tree::cfrom(eVec4),
+			gir_tree::cfrom(2),
+			v,
+			gir_tree::cfrom(w)
+		})
+	} {}
+};
+
+struct mat4 : gir_tree {
+	static constexpr gloa native_type = eMat4;
+
+	// NOTE: no components for now; that means no need for special care yet
+	mat4(const gir_tree &gt) : gir_tree(gt) {}
+
+	mat4(float x = 0.0f) : gir_tree {
+		gir_tree::cfrom(eConstruct, {
+				gir_tree::cfrom(eMat4),
+				gir_tree::cfrom(1),
+				gir_tree::cfrom(x),
+		})
+	} {}
 };
 
 // TODO: arithmetic
 // TODO: header
 inline gir_tree binary_operation(const gir_tree &A, const gir_tree &B, gloa op)
 {
-	gir_tree C;
-
-	C.data = op;
-	C.children.push_back(A);
-	C.children.push_back(B);
-
-	return C;
+	return gir_tree::from(op, A.cexpr & B.cexpr, { A, B });
 }
 
 // TODO: templatize
 inline f32 operator+(f32 A, f32 B)
 {
 	return f32(binary_operation(A, B, eAdd));
+}
+
+inline f32 operator*(f32 A, f32 B)
+{
+	return f32(binary_operation(A, B, eMul));
+}
+
+inline vec4 operator*(mat4 A, vec4 B)
+{
+	return vec4(binary_operation(A, B, eMul));
 }
 
 // TODO: requires
@@ -216,29 +246,29 @@ struct layout_input <vec3, Binding> {
 	// TODO: function to generate this,
 	// OR vec3 <Injected> specialization with required injection
 	// and vec3 = vec3 <Regular>
-	const gir_tree x = gir_tree::vfrom(eComponent, {
+	const f32 x = f32(gir_tree::vfrom(eComponent, {
 		gir_tree::cfrom(0),
 		gir_tree::vfrom(eLayoutInput, {
 			gir_tree::cfrom(eVec3),
 			gir_tree::cfrom(Binding),
 		})
-	});
+	}));
 
-	const gir_tree y = gir_tree::vfrom(eComponent, {
+	const f32 y = f32(gir_tree::vfrom(eComponent, {
 		gir_tree::cfrom(1),
 		gir_tree::vfrom(eLayoutInput, {
 			gir_tree::cfrom(eVec3),
 			gir_tree::cfrom(Binding),
 		})
-	});
+	}));
 
-	const gir_tree z = gir_tree::vfrom(eComponent, {
+	const f32 z = f32(gir_tree::vfrom(eComponent, {
 		gir_tree::cfrom(2),
 		gir_tree::vfrom(eLayoutInput, {
 			gir_tree::cfrom(eVec3),
 			gir_tree::cfrom(Binding),
 		})
-	});
+	}));
 
 	layout_input() {}
 
@@ -260,6 +290,27 @@ struct layout_output : T {
 		return *this;
 	}
 };
+
+// NOTE: Only one push constants per shader, therefore no ID tracking is needed
+template <typename T, typename ... Args>
+void push_constants_members_proxy(size_t N, size_t offset, T &sub, Args &... args)
+{
+	// TODO: add size information to pad structures appropriately...
+	sub = gir_tree::vfrom(ePushConstants, {
+		gir_tree::cfrom(T::native_type),
+		gir_tree::cfrom((int) N),
+		gir_tree::cfrom((int) offset)
+	});
+
+	if constexpr (sizeof...(Args) > 0)
+		push_constants_members_proxy(N + 1, offset + gloa_type_offset(T::native_type), args...);
+}
+
+template <typename ... Args>
+void push_constants_members(Args &... args)
+{
+	push_constants_members_proxy(0, 0, args...);
+}
 
 namespace intrinsics {
 

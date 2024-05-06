@@ -2,23 +2,32 @@
 
 #include <cppsl.hpp>
 
-// Vertex buffer; position (2) and color (3)
-constexpr float triangles[][5] {
-	{  0.0f, -0.5f, 1.0f, 0.0f, 0.0f },
-	{  0.5f,  0.5f, 0.0f, 1.0f, 0.0f },
-	{ -0.5f,  0.5f, 0.0f, 0.0f, 1.0f },
-};
+// GLM for vector math
+#include <glm/glm.hpp>
+#include <glm/gtc/matrix_transform.hpp>
 
+// Shader sources
+struct mvp {
+	mat4 model;
+	mat4 view;
+	mat4 proj;
+
+	mvp() {
+		push_constants_members(model, view, proj);
+	}
+};
 
 void vertex_shader
 (
-	const layout_input <vec2, 0> &position,
+	const layout_input <vec3, 0> &position,
 	const layout_input <vec3, 1> &color,
+	const mvp &mvp,
 	intrinsics::vertex &vintr,
 	layout_output <vec3, 0> &out_color
 )
 {
-	vintr.gl_Position = vec4(position, 0, 1);
+	vintr.gl_Position = mvp.proj * mvp.view * mvp.model * vec4(position, 1);
+	vintr.gl_Position.y = -1.0f * vintr.gl_Position.y;
 	out_color = color;
 }
 
@@ -30,6 +39,54 @@ void fragment_shader
 {
 	fragment = vec4(in_color, 1);
 }
+
+// Unit cube data
+static const std::vector <std::array <float, 6>> cube_vertex_data {
+	// Front
+	{ { -1.0f, -1.0f, -1.0f,  1.0f, 0.0f, 0.0f } },
+	{ {  1.0f, -1.0f, -1.0f,  1.0f, 0.0f, 0.0f } },
+	{ {  1.0f,  1.0f, -1.0f,  1.0f, 0.0f, 0.0f } },
+	{ { -1.0f,  1.0f, -1.0f,  1.0f, 0.0f, 0.0f } },
+
+	// Back
+	{ { -1.0f, -1.0f,  1.0f,  0.0f, 1.0f, 0.0f } },
+	{ {  1.0f, -1.0f,  1.0f,  0.0f, 1.0f, 0.0f } },
+	{ {  1.0f,  1.0f,  1.0f,  0.0f, 1.0f, 0.0f } },
+	{ { -1.0f,  1.0f,  1.0f,  0.0f, 1.0f, 0.0f } },
+
+	// Left
+	{ { -1.0f, -1.0f, -1.0f,  0.0f, 0.0f, 1.0f } },
+	{ { -1.0f, -1.0f,  1.0f,  0.0f, 0.0f, 1.0f } },
+	{ { -1.0f,  1.0f,  1.0f,  0.0f, 0.0f, 1.0f } },
+	{ { -1.0f,  1.0f, -1.0f,  0.0f, 0.0f, 1.0f } },
+
+	// Right
+	{ {  1.0f, -1.0f, -1.0f,  1.0f, 1.0f, 0.0f } },
+	{ {  1.0f, -1.0f,  1.0f,  1.0f, 1.0f, 0.0f } },
+	{ {  1.0f,  1.0f,  1.0f,  1.0f, 1.0f, 0.0f } },
+	{ {  1.0f,  1.0f, -1.0f,  1.0f, 1.0f, 0.0f } },
+
+	// Top
+	{ { -1.0f, -1.0f, -1.0f,  0.0f, 1.0f, 1.0f } },
+	{ { -1.0f, -1.0f,  1.0f,  0.0f, 1.0f, 1.0f } },
+	{ {  1.0f, -1.0f,  1.0f,  0.0f, 1.0f, 1.0f } },
+	{ {  1.0f, -1.0f, -1.0f,  0.0f, 1.0f, 1.0f } },
+
+	// Bottom
+	{ { -1.0f,  1.0f, -1.0f,  1.0f, 0.0f, 1.0f } },
+	{ { -1.0f,  1.0f,  1.0f,  1.0f, 0.0f, 1.0f } },
+	{ {  1.0f,  1.0f,  1.0f,  1.0f, 0.0f, 1.0f } },
+	{ {  1.0f,  1.0f, -1.0f,  1.0f, 0.0f, 1.0f } }
+};
+
+static const std::vector <uint32_t> cube_index_data {
+	0, 1, 2,	2, 3, 0,	// Front
+	4, 6, 5,	6, 4, 7,	// Back
+	8, 10, 9,	10, 8, 11,	// Left
+	12, 13, 14,	14, 15, 12,	// Right
+	16, 17, 18,	18, 19, 16,	// Top
+	20, 22, 21,	22, 20, 23	// Bottom
+};
 
 int main()
 {
@@ -48,7 +105,7 @@ int main()
 
 	// Create an application skeleton with the bare minimum
 	littlevk::Skeleton app;
-	app.skeletonize(phdev, { 800, 600 }, "Hello Triangle", EXTENSIONS);
+	app.skeletonize(phdev, { 800, 600 }, "Spinning Cube", EXTENSIONS);
 
 	// Create a deallocator for automatic resource cleanup
 	auto deallocator = new littlevk::Deallocator { app.device };
@@ -56,14 +113,23 @@ int main()
 	// Create a render pass
 	vk::RenderPass render_pass = littlevk::RenderPassAssembler(app.device, deallocator)
 		.add_attachment(littlevk::default_color_attachment(app.swapchain.format))
+		.add_attachment(littlevk::default_depth_attachment())
 		.add_subpass(vk::PipelineBindPoint::eGraphics)
 			.color_attachment(0, vk::ImageLayout::eColorAttachmentOptimal)
+			.depth_attachment(1, vk::ImageLayout::eDepthStencilAttachmentOptimal)
 			.done();
+
+	// Create a depth buffer
+	littlevk::Image depth_buffer = bind(app.device, memory_properties, deallocator)
+		.image(app.window->extent,
+			vk::Format::eD32Sfloat,
+			vk::ImageUsageFlagBits::eDepthStencilAttachment,
+			vk::ImageAspectFlagBits::eDepth);
 
 	// Create framebuffers from the swapchain
 	littlevk::FramebufferGenerator generator(app.device, render_pass, app.window->extent, deallocator);
 	for (const auto &view : app.swapchain.image_views)
-		generator.add(view);
+		generator.add(view, depth_buffer.view);
 
 	std::vector <vk::Framebuffer> framebuffers = generator.unpack();
 
@@ -78,18 +144,28 @@ int main()
 	auto command_buffers = app.device.allocateCommandBuffers
 		({ command_pool, vk::CommandBufferLevel::ePrimary, 2 });
 
-	// Allocate triangle vertex buffer
-	littlevk::Buffer vertex_buffer = littlevk::bind(app.device, memory_properties, deallocator)
-		.buffer(triangles, sizeof(triangles), vk::BufferUsageFlagBits::eVertexBuffer);
+	// Simoultaneously allocate vertex and index buffers
+	littlevk::Buffer vertex_buffer;
+	littlevk::Buffer index_buffer;
+
+	std::tie(vertex_buffer, index_buffer) = bind(app.device, memory_properties, deallocator)
+		.buffer(cube_vertex_data, vk::BufferUsageFlagBits::eVertexBuffer)
+		.buffer(cube_index_data, vk::BufferUsageFlagBits::eIndexBuffer);
 
 	// Create a graphics pipeline
+	struct MVP {
+		glm::mat4 model;
+		glm::mat4 view;
+		glm::mat4 proj;
+	};
+
 	auto vsource = translate <Stage::Vertex> (vertex_shader);
 	fmt::println("vertex source:\n{}", vsource);
 
 	auto fsource = translate <Stage::Fragment> (fragment_shader);
 	fmt::println("fragment source:\n{}", fsource);
 
-	auto vertex_layout = littlevk::VertexLayout <littlevk::rg32f, littlevk::rgb32f> ();
+	auto vertex_layout = littlevk::VertexLayout <littlevk::rgb32f, littlevk::rgb32f> ();
 
 	auto bundle = littlevk::ShaderStageBundle(app.device, deallocator)
 		.attach(vsource, vk::ShaderStageFlagBits::eVertex)
@@ -98,23 +174,38 @@ int main()
 	littlevk::Pipeline ppl = littlevk::PipelineAssembler(app.device, app.window, deallocator)
 		.with_render_pass(render_pass, 0)
 		.with_vertex_layout(vertex_layout)
-		.with_shader_bundle(bundle);
+		.with_shader_bundle(bundle)
+		.with_push_constant <MVP> (vk::ShaderStageFlagBits::eVertex);
 
 	// Syncronization primitives
 	auto sync = littlevk::present_syncronization(app.device, 2).unwrap(deallocator);
 
+	// Prepare camera and model matrices
+	glm::mat4 view = glm::lookAt(
+		glm::vec3 { 0.0f, 0.0f, 5.0f },
+		glm::vec3 { 0.0f, 0.0f, 0.0f },
+		glm::vec3 { 0.0f, 1.0f, 0.0f }
+	);
+
+	// Resize callback
 	auto resize = [&]() {
 		app.resize();
 
-		// We can use the same generator; unpack() clears previously made framebuffers
+		// Recreate the depth buffer
+		littlevk::Image depth_buffer = bind(app.device, memory_properties, deallocator)
+			.image(app.window->extent,
+				vk::Format::eD32Sfloat,
+				vk::ImageUsageFlagBits::eDepthStencilAttachment,
+				vk::ImageAspectFlagBits::eDepth);
+
+		// Rebuid the framebuffers
 		generator.extent = app.window->extent;
 		for (const auto &view : app.swapchain.image_views)
-			generator.add(view);
+			generator.add(view, depth_buffer.view);
 
 		framebuffers = generator.unpack();
 	};
 
-	// TODO: text render framerate
 	// Render loop
         uint32_t frame = 0;
         while (true) {
@@ -129,22 +220,33 @@ int main()
 			continue;
 		}
 
-		// Start the render pass
+		// Record command buffer
 		const auto &cmd = command_buffers[frame];
 		cmd.begin(vk::CommandBufferBeginInfo {});
 
-		// Set viewport and scissor
-		littlevk::viewport_and_scissor(cmd, littlevk::RenderArea(app.window));
-
-		const auto &rpbi = littlevk::default_rp_begin_info <1>
+		const auto &rpbi = littlevk::default_rp_begin_info <2>
 			(render_pass, framebuffers[op.index], app.window);
 
+		// Start the render pass
 		cmd.beginRenderPass(rpbi, vk::SubpassContents::eInline);
 
+		// Set viewport and scissor
+		littlevk::viewport_and_scissor(command_buffers[frame], littlevk::RenderArea(app.window));
+
 		// Render the triangle
+		glm::mat4 model = glm::mat4 { 1.0f };
+		glm::mat4 proj = glm::perspective(glm::radians(45.0f), app.aspect_ratio(), 0.1f, 10.0f);
+
+		// Rotate the model matrix
+		model = glm::rotate(model, (float) glfwGetTime() * glm::radians(90.0f), glm::vec3 { 0.0f, 1.0f, 0.0f });
+
+		MVP push_constants { model, view, proj };
+
 		cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, ppl.handle);
+		cmd.pushConstants <MVP> (ppl.layout, vk::ShaderStageFlagBits::eVertex, 0, push_constants);
 		cmd.bindVertexBuffers(0, vertex_buffer.buffer, { 0 });
-		cmd.draw(3, 1, 0, 0);
+		cmd.bindIndexBuffer(index_buffer.buffer, 0, vk::IndexType::eUint32);
+		cmd.drawIndexed(cube_index_data.size(), 1, 0, 0, 0);
 
 		cmd.endRenderPass();
 		cmd.end();

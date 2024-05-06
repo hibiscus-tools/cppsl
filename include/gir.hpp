@@ -9,11 +9,14 @@ enum gloa : int {
 	eConstruct, eIndex, eComponent,
 
 	// Types
-	eNone, eInt32, eFloat32, eVec2, eVec3, eVec4,
+	eNone, eInt32, eFloat32,
+	eVec2, eVec3, eVec4,
+	eMat2, eMat3, eMat4,
 
 	// Shader inputs and outputs
 	eLayoutInput,
 	eLayoutOutput,
+	ePushConstants,
 
 	// Arithmetic
 	eAdd, eSub, eMul, eDiv,
@@ -25,15 +28,30 @@ enum gloa : int {
 static constexpr const char *GLOA_STRINGS[] {
 	"Construct", "Index", "Component",
 
-	"None", "Int32", "Float32", "Vec2", "Vec3", "Vec4",
+	"None", "Int32", "Float32",
+	"Vec2", "Vec3", "Vec4",
+	"Mat2", "Mat3", "Mat4",
 
 	"LayoutInput",
 	"LayoutOutput",
+	"PushConstants",
 
 	"Add", "Sub", "Mul", "Div",
 
 	"gl_Position"
 };
+
+// TODO: size information as well...
+constexpr size_t gloa_type_offset(gloa x)
+{
+	// NOTE: this is not the same as the actual size
+	switch (x) {
+	case eMat4:
+		return 16 * sizeof(float);
+	}
+
+	throw "(cppsl) unknown type {} for offset";
+}
 
 // GLSL Intermediate Representation (atom)
 using gir_t = std::variant <int, float, gloa>;

@@ -7,6 +7,7 @@
 
 inline std::string gloa_type_string(gloa x)
 {
+	// TODO: unordered map?
 	switch (x) {
 	case eNone:
 		return "";
@@ -18,6 +19,8 @@ inline std::string gloa_type_string(gloa x)
 		return "vec3";
 	case eVec4:
 		return "vec4";
+	case eMat4:
+		return "mat4";
 	default:
 		break;
 	}

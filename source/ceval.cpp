@@ -22,7 +22,6 @@ gir_tree ceval(const gir_tree &gt)
 			return ceval_construct(gt.children);
 			break;
 		case eComponent:
-			fmt::println("CEVAL ON {}", gt);
 			return ceval_component(gt.children);
 			break;
 		default:
