@@ -48,6 +48,8 @@ constexpr size_t gloa_type_offset(gloa x)
 	switch (x) {
 	case eMat4:
 		return 16 * sizeof(float);
+	default:
+		break;
 	}
 
 	throw "(cppsl) unknown type {} for offset";
@@ -82,3 +84,12 @@ struct gir_tree {
 
 // Performing constant expression simplifications
 gir_tree ceval(const gir_tree &);
+
+// GLSL Compressed Intermediate Representation (graph)
+struct gcir_graph {
+	std::vector <gir_t> data;
+	std::vector <std::vector <int>> refs;
+};
+
+// Compressing GIR into GCIR
+gcir_graph compress(const gir_tree &);

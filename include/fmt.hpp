@@ -1,5 +1,7 @@
 #pragma once
 
+#include <stack>
+
 #include "gir.hpp"
 #include "translate.hpp"
 
@@ -63,6 +65,44 @@ inline std::string format_as(const gir_tree &gt, size_t indent = 0)
 	return out;
 }
 
+inline std::string format_as(const gcir_graph &gcir)
+{
+	std::stack <std::pair <int, int>> refs;
+	refs.push({ 0, 0 });
+
+	std::string out = "";
+	while (!refs.empty()) {
+		auto [r, t] = refs.top();
+		refs.pop();
+
+		const gir_t &data = gcir.data[r];
+
+		std::string variant = "int";
+		if (std::holds_alternative <float> (data))
+			variant = "float";
+		if (std::holds_alternative <gloa> (data))
+			variant = "gloa";
+
+		std::string rs = "";
+		for (size_t i = 0; i < gcir.refs[r].size(); i++) {
+			rs += std::to_string(gcir.refs[r][i]);
+			if (i + 1 < gcir.refs[r].size())
+				rs += ", ";
+		}
+
+		if (rs.empty())
+			rs = "X";
+
+		std::string tab(t, ' ');
+		out += fmt::format("{:>3}: {}[{:>5s} | {} | {}]\n", r, tab, variant, data, rs);
+
+		// Add child reference in reverse order
+		for (auto rc = gcir.refs[r].rbegin(); rc != gcir.refs[r].rend(); rc++)
+			refs.push({ *rc, t + 4 });
+	}
+
+	return out;
+}
 
 inline std::string format_as(const statement &s)
 {

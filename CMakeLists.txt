@@ -9,6 +9,7 @@ set(CMAKE_CXX_STANDARD 20)
 
 add_library(cppsl
 	source/ceval.cpp
+	source/compress.cpp
 	source/gir.cpp
 	source/translate.cpp)
 

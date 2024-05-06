@@ -173,7 +173,7 @@ struct vec4 : gir_tree {
 	} {}
 
 	vec4(const vec2 &v, float z = 0.0f, float w = 0.0f) : gir_tree {
-		gir_tree::cfrom(eConstruct, {
+		gir_tree::from(eConstruct, v.cexpr, {
 			gir_tree::cfrom(eVec4),
 			gir_tree::cfrom(3),
 			v,
@@ -183,11 +183,20 @@ struct vec4 : gir_tree {
 	} {}
 
 	vec4(const vec3 &v, float w = 0.0f) : gir_tree {
-		gir_tree::cfrom(eConstruct, {
+		gir_tree::from(eConstruct, v.cexpr, {
 			gir_tree::cfrom(eVec4),
 			gir_tree::cfrom(2),
 			v,
 			gir_tree::cfrom(w)
+		})
+	} {}
+
+	// Constructors involving f32
+	vec4(const vec3 &v, f32 w) : gir_tree {
+		gir_tree::cfrom(eConstruct, {
+			gir_tree::cfrom(eVec4),
+			gir_tree::cfrom(2),
+			v, w
 		})
 	} {}
 };
@@ -315,7 +324,7 @@ void push_constants_members(Args &... args)
 namespace intrinsics {
 
 struct vertex {
-	vec4 gl_Position = vec4();
+	vec4 gl_Position = vec4(0.0f);
 };
 
 }

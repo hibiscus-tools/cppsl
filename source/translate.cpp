@@ -298,6 +298,9 @@ std::string translate_gir_tree(const gir_tree &unified, const std::vector <unt_l
 {
 	fmt::println("\nunified tree for shader:\n{}", unified);
 
+	gcir_graph graph = compress(unified);
+	fmt::println("\ncompressed graph:\n{}", graph);
+
 	// TODO: create a gir_link_tree
 
 	// Grab all used bindings
