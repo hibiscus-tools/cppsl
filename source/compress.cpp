@@ -64,7 +64,7 @@ gcir_graph compress(const gir_tree &gt)
 	fill_compressed_representation(gt, graph);
 
 	while (true) {
-		printf("BEFORE: %lu nodes\n", graph.data.size());
+		// printf("BEFORE: %lu nodes\n", graph.data.size());
 
 		std::vector <int> node_sizes;
 		for (size_t i = 0; i < graph.data.size(); i++)
@@ -87,22 +87,22 @@ gcir_graph compress(const gir_tree &gt)
 						max_reffed = i;
 					}
 
-					printf("equal branches: %lu, %lu\n", i, j);
+					// printf("equal branches: %lu, %lu\n", i, j);
 				}
 			}
 		}
 
 		if (equals.empty()) {
-			printf("Out of compressions, done.\n");
+			// printf("Out of compressions, done.\n");
 			break;
 		}
 
-		printf("equal branch maps: CHOSEN %d\n", max_reffed);
-		for (auto [j, i] : equals) {
-			if (i != max_reffed)
-				continue;
-			printf("  %d -> %d\n", j, i);
-		}
+		// printf("equal branch maps: CHOSEN %d\n", max_reffed);
+		// for (auto [j, i] : equals) {
+		// 	if (i != max_reffed)
+		// 		continue;
+		// 	printf("  %d -> %d\n", j, i);
+		// }
 
 		// Replace references
 		for (size_t i = 0; i < graph.data.size(); i++) {
@@ -118,7 +118,7 @@ gcir_graph compress(const gir_tree &gt)
 		readdress_compressed(graph, 0, regraph, filled);
 		graph = regraph;
 
-		printf("AFTER: %lu nodes\n", graph.data.size());
+		// printf("AFTER: %lu nodes\n", graph.data.size());
 
 		// TODO: repeat until no more replacements...
 	}

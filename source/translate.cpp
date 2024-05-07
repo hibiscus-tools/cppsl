@@ -1,6 +1,7 @@
 #include <cassert>
 #include <map>
 #include <set>
+#include <variant>
 
 #include <fmt/format.h>
 
@@ -12,144 +13,6 @@ static const std::string LAYOUT_INPUT_PREFIX = "_lin";
 static const std::string LAYOUT_OUTPUT_PREFIX = "_lout";
 static const std::string PUSH_CONSTANTS_PREFIX = "_pc";
 static const std::string PUSH_CONSTANTS_MEMBER_PREFIX = "m";
-
-std::vector <statement> translate(const gir_tree &, int &);
-
-std::vector <statement> translate_variadic(const std::vector <gir_tree> &nodes, int &generator)
-{
-	std::vector <statement> statements;
-	for (const auto &gt : nodes) {
-		auto cstmts = translate(gt, generator);
-		statements.insert(statements.end(), cstmts.begin(), cstmts.end());
-	}
-
-	return statements;
-}
-
-std::vector <statement> translate_layout_input(const std::vector <gir_tree> &nodes, int &generator)
-{
-	gloa type = std::get <gloa> (nodes[0].data);
-	int binding = std::get <int> (nodes[1].data);
-	return { statement::from(type, fmt::format("{}{}", LAYOUT_INPUT_PREFIX, binding), generator) };
-}
-
-std::vector <statement> translate_push_constants(const std::vector <gir_tree> &nodes, int &generator)
-{
-	gloa type = std::get <gloa> (nodes[0].data);
-	int member = std::get <int> (nodes[1].data);
-	return { statement::from(type, fmt::format("{}.{}{}", PUSH_CONSTANTS_PREFIX, PUSH_CONSTANTS_MEMBER_PREFIX, member), generator) };
-}
-
-std::vector <statement> translate_layout_output(const std::vector <gir_tree> &nodes, int &generator)
-{
-	int binding = std::get <int> (nodes[0].data);
-	auto statements = translate(nodes[1], generator);
-	statement after = statement::builtin_from(fmt::format("{}{}", LAYOUT_OUTPUT_PREFIX, binding),
-		 statements.back().full_loc());
-	statements.push_back(after);
-	return statements;
-}
-
-std::vector <statement> translate_gl_position(const std::vector <gir_tree> &nodes, int &generator)
-{
-	auto statements = translate(nodes[0], generator);
-	statement after = statement::builtin_from("gl_Position", statements.back().full_loc());
-	statements.push_back(after);
-	return statements;
-}
-
-std::vector <statement> translate_binary_operation(gloa op, const std::vector <gir_tree> &nodes, int &generator)
-{
-	static const std::unordered_map <gloa, std::string> OPERATION_MAP {
-		{ eAdd, "+" }, { eMul, "*" }
-	};
-
-	assert(nodes.size() == 2);
-	auto s0 = translate(nodes[0], generator);
-	auto s1 = translate(nodes[1], generator);
-
-	statement s0_back = s0.back();
-	statement s1_back = s1.back();
-
-	// TODO: check the type maps...
-	gloa type = s1_back.loc.type;
-	statement after = statement::from(type, fmt::format("{} {} {}", s0_back.full_loc(), OPERATION_MAP.at(op), s1_back.full_loc()), generator);
-
-	std::vector <statement> statements;
-	statements.insert(statements.end(), s0.begin(), s0.end());
-	statements.insert(statements.end(), s1.begin(), s1.end());
-	statements.push_back(after);
-	return statements;
-}
-
-std::string function_call(const std::string &ftn, const std::vector <std::string> &args)
-{
-	std::string out = ftn + "(";
-	for (size_t i = 0; i < args.size(); i++) {
-		out += args[i];
-		if (i + 1 < args.size())
-			out += ", ";
-	}
-
-	return out + ")";
-}
-
-// TODO: inlining certain sources...
-std::vector <statement> translate_construct(const std::vector <gir_tree> &nodes, int &generator)
-{
-	gloa type = std::get <gloa> (nodes[0].data);
-	if (type == eFloat32) {
-		auto v = translate(nodes[1], generator);
-		statement vlast = v.back();
-		statement after = statement::from(eFloat32, vlast.full_loc(), generator);
-		v.push_back(after);
-		return v;
-	} else if (type == eVec3) {
-		int count = std::get <int> (nodes[1].data);
-
-		statement_list v;
-		std::vector <std::string> args;
-		for (int i = 0; i < count; i++) {
-			auto vi = translate(nodes[i + 2], generator);
-			v.insert(v.end(), vi.begin(), vi.end());
-			args.push_back(vi.back().full_loc());
-		}
-
-		statement after = statement::from(eVec3, function_call("vec3", args), generator);
-		v.push_back(after);
-		return v;
-	} else if (type == eVec4) {
-		int count = std::get <int> (nodes[1].data);
-
-		statement_list v;
-		std::vector <std::string> args;
-		for (int i = 0; i < count; i++) {
-			auto vi = translate(nodes[i + 2], generator);
-			v.insert(v.end(), vi.begin(), vi.end());
-			args.push_back(vi.back().full_loc());
-		}
-
-		statement after = statement::from(eVec4, function_call("vec4", args), generator);
-		v.push_back(after);
-		return v;
-	} else if (type == eMat4) {
-		int count = std::get <int> (nodes[1].data);
-
-		statement_list v;
-		std::vector <std::string> args;
-		for (int i = 0; i < count; i++) {
-			auto vi = translate(nodes[i + 2], generator);
-			v.insert(v.end(), vi.begin(), vi.end());
-			args.push_back(vi.back().full_loc());
-		}
-
-		statement after = statement::from(eMat4, function_call("mat4", args), generator);
-		v.push_back(after);
-		return v;
-	}
-
-	throw fmt::system_error(1, "(cppsl) unknown type {}", type);
-}
 
 static constexpr gloa scalar_type(gloa vector_type)
 {
@@ -165,148 +28,250 @@ static constexpr gloa scalar_type(gloa vector_type)
 	return eNone;
 }
 
-std::vector <statement> translate_component(const std::vector <gir_tree> &nodes, int &generator)
+std::string function_call(const std::string &ftn, const std::vector <std::string> &args)
 {
-	static const std::string postfixes[] { ".x", ".y", ".z", ".w" };
-	int index = std::get <int> (nodes[0].data);
-	auto statements = translate(nodes[1], generator);
-	statement last = statements.back();
-	statement after = statement::from(scalar_type(last.loc.type), last.full_loc() + postfixes[index], generator);
-	statements.push_back(after);
-	return statements;
+	std::string out = ftn + "(";
+	for (size_t i = 0; i < args.size(); i++) {
+		out += args[i];
+		if (i + 1 < args.size())
+			out += ", ";
+	}
+
+	return out + ")";
 }
 
-std::vector <statement> translate(const gir_tree &gt, int &generator)
+// TODO: inlining certain sources...
+struct translator {
+	// Full graph
+	gcir_graph graph;
+
+	// State data
+	int generator;
+	int T;
+
+	// Cached translations
+	std::map <int, statement_list> cache;
+
+	// Construction from graph only
+	translator(const gcir_graph &gcir) : graph(gcir), generator(0), T(0), cache() {}
+
+	using refs = std::vector <int>;
+	using handler = std::function <statement_list (const refs &)>;
+
+	statement_list handle_none(const refs &R) {
+		statement_list statements;
+		for (int C : R) {
+			auto [sC, _] = cached_translation(C);
+			statements.insert(statements.end(), sC.begin(), sC.end());
+		}
+
+		return statements;
+	}
+
+	statement_list handle_layout_input(const refs &R) {
+		gloa type = std::get <gloa> (graph.data[R[0]]);
+		int binding = std::get <int> (graph.data[R[1]]);
+		return { statement::from(type, fmt::format("{}{}", LAYOUT_INPUT_PREFIX, binding), generator) };
+	}
+
+	statement_list handle_push_constants(const refs &R) {
+		gloa type = std::get <gloa> (graph.data[R[0]]);
+		int member = std::get <int> (graph.data[R[1]]);
+		return { statement::from(type, fmt::format("{}.{}{}", PUSH_CONSTANTS_PREFIX, PUSH_CONSTANTS_MEMBER_PREFIX, member), generator) };
+	}
+
+	statement_list handle_layout_output(const refs &R) {
+		int binding = std::get <int> (graph.data[R[0]]);
+		auto [statements, last] = cached_translation(R[1]);
+		statement after = statement::builtin_from(fmt::format("{}{}", LAYOUT_OUTPUT_PREFIX, binding), last.full_loc());
+		statements.push_back(after);
+		return statements;
+	}
+
+	statement_list handle_gl_position(const refs &R) {
+		auto [statements, last] = cached_translation(R[0]);
+		statement after = statement::builtin_from("gl_Position", last.full_loc());
+		statements.push_back(after);
+		return statements;
+	}
+
+	// TODO: conglomerate handler for all vector types, scalar types... etc
+	statement_list handle_construct_f32(const refs &R) {
+		auto [statements, last] = cached_translation(R[1]);
+		statement after = statement::from(eFloat32, last.full_loc(), generator);
+		statements.push_back(after);
+		return statements;
+	}
+
+	statement_list handle_construct_vec4(const refs &R) {
+		int count = std::get <int> (graph.data[R[1]]);
+
+		statement_list v;
+		std::vector <std::string> args;
+		for (int i = 0; i < count; i++) {
+			auto [vi, last] = cached_translation(R[i + 2]);
+			v.insert(v.end(), vi.begin(), vi.end());
+			args.push_back(last.full_loc());
+		}
+
+		statement after = statement::from(eVec4, function_call("vec4", args), generator);
+		v.push_back(after);
+		return v;
+	}
+
+	statement_list handle_construct(const refs &R) {
+		gloa type = std::get <gloa> (graph.data[R[0]]);
+
+		// TODO: switch?
+		if (type == eFloat32)
+			return handle_construct_f32(R);
+		if (type == eVec4)
+			return handle_construct_vec4(R);
+
+		throw fmt::system_error(1, "(cppsl) unknown type {}", type);
+	}
+
+	statement_list handle_component(const refs &R) {
+		static const std::string postfixes[] { ".x", ".y", ".z", ".w" };
+		int index = std::get <int> (graph.data[R[0]]);
+
+		auto [statements, last] = cached_translation(R[1]);
+		statement after = statement::from(scalar_type(last.loc.type), last.full_loc() + postfixes[index], generator);
+		statements.push_back(after);
+		return statements;
+	}
+
+	statement_list handle_binary_operation(const refs &R, gloa op) {
+		static const std::unordered_map <gloa, std::string> OPERATION_MAP {
+			{ eAdd, "+" }, { eMul, "*" }
+		};
+
+		assert(R.size() == 2);
+		auto [s0, s0_last] = cached_translation(R[0]);
+		auto [s1, s1_last] = cached_translation(R[1]);
+
+		// TODO: check the type maps...
+		gloa type = s1_last.loc.type;
+		statement after = statement::from(type, fmt::format("{} {} {}", s0_last.full_loc(), OPERATION_MAP.at(op), s1_last.full_loc()), generator);
+
+		std::vector <statement> statements;
+		statements.insert(statements.end(), s0.begin(), s0.end());
+		statements.insert(statements.end(), s1.begin(), s1.end());
+		statements.push_back(after);
+		return statements;
+	}
+
+	statement_list operator()(gloa x) {
+		const refs &R = graph.refs[T];
+		switch (x) {
+		case eNone:
+			return handle_none(R);
+		case eGlPosition:
+			return handle_gl_position(R);
+		case eConstruct:
+			return handle_construct(R);
+		case eComponent:
+			return handle_component(R);
+		case eLayoutInput:
+			return handle_layout_input(R);
+		case eLayoutOutput:
+			return handle_layout_output(R);
+		case ePushConstants:
+			return handle_push_constants(R);
+		case eAdd:
+		case eMul:
+			return handle_binary_operation(R, x);
+		default:
+			break;
+		}
+
+		throw fmt::system_error(1, "(cppsl) unexpected gloa of {}", x);
+	}
+
+	statement_list operator()(int x) {
+		return { statement::from(eInt32, fmt::format("{}", x), generator) };
+	}
+
+	statement_list operator()(float x) {
+		return { statement::from(eFloat32, fmt::format("{}", x), generator) };
+	}
+
+	statement_list translate(int t = 0) {
+		T = t;
+		auto statements = std::visit(*this, graph.data[T]);
+		cache[t] = statements;
+		return statements;
+	}
+
+	std::pair <statement_list, statement> cached_translation(int t) {
+		if (cache.count(t)) {
+			const auto &statements = cache[t];
+			return std::make_pair(statement_list {}, statements.back());
+		} else {
+			auto statements = translate(t);
+			return std::make_pair(statements, statements.back());
+		}
+	}
+};
+
+// Gathering shader input/output usage
+struct shader_io {
+	std::set <std::pair <gloa, int>> layout_inputs;
+	std::set <int> layout_outputs;
+	std::map <int, std::pair <gloa, int>> push_constants;
+};
+
+shader_io gather_shader_io(const gcir_graph &graph, int T = 0)
 {
-	struct visitor {
-		gir_tree gt;
-		int &generator;
+	const gir_t &data = graph.data[T];
+	const auto &R = graph.refs[T];
 
-		std::vector <statement> operator()(gloa x) {
-			// TODO: table dispatcher to ftn pointers, check for non null
-			switch (x) {
-			case eNone:
-				return translate_variadic(gt.children, generator);
-			case eConstruct:
-				return translate_construct(gt.children, generator);
-			case eComponent:
-				return translate_component(gt.children, generator);
-			case eLayoutInput:
-				return translate_layout_input(gt.children, generator);
-			case eLayoutOutput:
-				return translate_layout_output(gt.children, generator);
-			case ePushConstants:
-				return translate_push_constants(gt.children, generator);
-			case eGlPosition:
-				return translate_gl_position(gt.children, generator);
-			// Binary operations
-			case eAdd:
-			case eMul:
-				return translate_binary_operation(x, gt.children, generator);
-			default:
-				break;
-			}
-
-			throw fmt::system_error(1, "(cppsl) unsupported <gloa> of {}", x);
-		}
-
-		std::vector <statement> operator()(int x) {
-			return { statement::from(eInt32, fmt::format("{}", x), generator) };
-		}
-
-		std::vector <statement> operator()(float x) {
-			return { statement::from(eFloat32, fmt::format("{}", x), generator) };
-		}
-	};
-
-	return std::visit(visitor { gt, generator }, gt.data);
-}
-
-// TODO: template these two
-std::set <std::pair <gloa, int>> used_layout_input_bindings(const gir_tree &gt)
-{
-	if (std::holds_alternative <gloa> (gt.data)) {
-		gloa x = std::get <gloa> (gt.data);
+	shader_io combined;
+	if (std::holds_alternative <gloa> (data)) {
+		gloa x = std::get <gloa> (data);
 		if (x == eLayoutInput) {
-			gloa type = std::get <gloa> (gt.children[0].data);
-			int binding = std::get <int> (gt.children[1].data);
-			return { { type, binding } };
+			gloa type = std::get <gloa> (graph.data[R[0]]);
+			int binding = std::get <int> (graph.data[R[1]]);
+			combined.layout_inputs = { std::make_pair(type, binding) };
+		} else if (x == eLayoutOutput) {
+			int binding = std::get <int> (graph.data[R[0]]);
+			combined.layout_outputs = { binding };
+		} else if (x == ePushConstants) {
+			gloa type = std::get <gloa> (graph.data[R[0]]);
+			int member = std::get <int> (graph.data[R[1]]);
+			int offset = std::get <int> (graph.data[R[2]]);
+			combined.push_constants = { std::make_pair(member, std::make_pair(type, offset)) };
 		}
 	}
 
-	std::set <std::pair <gloa, int>> used;
-	for (const gir_tree &cgt : gt.children) {
-		auto cused = used_layout_input_bindings(cgt);
-		used.insert(cused.begin(), cused.end());
-	}
-
-	return used;
-}
-
-std::set <int> used_layout_output_bindings(const gir_tree &gt)
-{
-	if (std::holds_alternative <gloa> (gt.data)) {
-		gloa x = std::get <gloa> (gt.data);
-		if (x == eLayoutOutput) {
-			int binding = std::get <int> (gt.children[0].data);
-			return { binding };
-		}
-	}
-
-	std::set <int> used;
-	for (const gir_tree &cgt : gt.children) {
-		auto cused = used_layout_output_bindings(cgt);
-		used.insert(cused.begin(), cused.end());
-	}
-
-	return used;
-}
-
-std::map <int, std::pair <gloa, int>> push_constants_structure(const gir_tree &gt)
-{
-	if (std::holds_alternative <gloa> (gt.data)) {
-		gloa x = std::get <gloa> (gt.data);
-		if (x == ePushConstants) {
-			gloa type = std::get <gloa> (gt.children[0].data);
-			int member = std::get <int> (gt.children[1].data);
-			int offset = std::get <int> (gt.children[2].data);
-			return { { member, { type, offset } } };
-		}
-	}
-
-	std::map <int, std::pair <gloa, int>> structure;
-	for (const gir_tree &cgt : gt.children) {
-		auto cstruct = push_constants_structure(cgt);
+	for (int C : R) {
+		auto io = gather_shader_io(graph, C);
+		combined.layout_inputs.insert(io.layout_inputs.begin(), io.layout_inputs.end());
+		combined.layout_outputs.insert(io.layout_outputs.begin(), io.layout_outputs.end());
 
 		// Check for no conflicting members
-		for (const auto &[member, info] : cstruct) {
-			if (structure.count(member))
-				assert(structure[member] == info);
+		for (const auto &[member, info] : io.push_constants) {
+			if (combined.push_constants.count(member))
+				assert(combined.push_constants[member] == info);
 			else
-				structure[member] = info;
+				combined.push_constants[member] = info;
 		}
 	}
 
-	return structure;
+	return combined;
 }
 
 namespace detail {
 
 // TODO: separate optimization stage
 
-std::string translate_gir_tree(const gir_tree &unified, const std::vector <unt_layout_output> &louts)
+// TODO: pass the gcir instead; compress before translation...
+std::string translate(const gcir_graph &graph, const std::vector <unt_layout_output> &louts)
 {
-	fmt::println("\nunified tree for shader:\n{}", unified);
-
-	gcir_graph graph = compress(unified);
 	fmt::println("\ncompressed graph:\n{}", graph);
 
-	// TODO: create a gir_link_tree
-
-	// Grab all used bindings
-	auto used_lib = used_layout_input_bindings(unified);
-	auto used_lob = used_layout_output_bindings(unified);
-	auto pc_struct = push_constants_structure(unified);
+	// Grab information of all shader inputs and outputs
+	auto io = gather_shader_io(graph);
 
 	// TODO: also all output bindings
 
@@ -314,20 +279,20 @@ std::string translate_gir_tree(const gir_tree &unified, const std::vector <unt_l
 	std::string code = "#version 450\n";
 
 	// Input layout bindings
-	for (auto [type, binding] : used_lib) {
+	for (auto [type, binding] : io.layout_inputs) {
 		code += fmt::format("layout (location = {}) in {} {}{};\n",
 			binding, gloa_type_string(type), LAYOUT_INPUT_PREFIX, binding);
 	}
 
 	// Output layout bindings
-	for (auto binding : used_lob) {
+	for (auto binding : io.layout_outputs) {
 		gloa type = louts[binding].type;
 		code += fmt::format("layout (location = {}) out {} {}{};\n",
 			binding, gloa_type_string(type), LAYOUT_OUTPUT_PREFIX, binding);
 	}
 
 	// Push constants
-	if (pc_struct.size()) {
+	if (io.push_constants.size()) {
 		// fmt::println("pc_struct:");
 		// for (const auto &[member, info] : pc_struct)
 		// 	fmt::println("  {}: {:<5} +{}", member, gloa_type_string(info.first), info.second);
@@ -335,7 +300,7 @@ std::string translate_gir_tree(const gir_tree &unified, const std::vector <unt_l
 		code += fmt::format("layout (push_constant) uniform PushConstants {{\n");
 		// TODO: track the size for necessary paddings
 		int offed = 0;
-		for (const auto &[member, info] : pc_struct) {
+		for (const auto &[member, info] : io.push_constants) {
 			assert(offed <= info.second);
 			if (offed < info.second) {
 				int size = (info.second - offed)/sizeof(float);
@@ -351,8 +316,8 @@ std::string translate_gir_tree(const gir_tree &unified, const std::vector <unt_l
 
 	code += "void main() {\n";
 
-	int generator = 0;
-	auto statements = translate(unified, generator);
+	auto tr = translator(graph);
+	auto statements = tr.translate();
 	for (const statement &s : statements)
 		code += fmt::format("  {}\n", s);
 

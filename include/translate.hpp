@@ -62,24 +62,9 @@ struct unt_layout_output {
 // TODO: support multi output programs
 namespace detail {
 
-// TODO: storage buffer outputs
-// std::string translate_vertex_shader(const intrinsics::vertex &, const std::vector <unt_layout_output> &);
-// std::string translate_fragment_shader(const std::vector <unt_layout_output> &);
-
-std::string translate_gir_tree(const gir_tree &, const std::vector <unt_layout_output> &);
+std::string translate(const gcir_graph &, const std::vector <unt_layout_output> &);
 
 }
-
-// TODO: template
-// inline std::string translate_vertex_shader(const intrinsics::vertex &vintr, const std::vector <unt_layout_output> &louts)
-// {
-// 	return detail::translate_vertex_shader(vintr, louts);
-// }
-//
-// inline std::string translate_fragment_shader(const std::vector <unt_layout_output> &louts)
-// {
-// 	return detail::translate_fragment_shader(louts);
-// }
 
 enum class Stage {
 	Vertex,
@@ -193,8 +178,9 @@ struct translate_dispatcher <Stage::Vertex, F> {
 		}
 
 		gir_tree unified = gir_tree::from(eNone, cexpr, outputs);
+		gcir_graph graph = compress(unified);
 
-		return detail::translate_gir_tree(unified, souts.louts);
+		return detail::translate(graph, souts.louts);
 	}
 };
 
@@ -220,8 +206,9 @@ struct translate_dispatcher <Stage::Fragment, F> {
 		}
 
 		gir_tree unified = gir_tree::from(eNone, cexpr, outputs);
+		gcir_graph graph = compress(unified);
 
-		return detail::translate_gir_tree(unified, souts.louts);
+		return detail::translate(graph, souts.louts);
 	}
 };
 
