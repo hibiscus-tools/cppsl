@@ -3,10 +3,15 @@
 #include <variant>
 #include <vector>
 
+#include <fmt/format.h>
+
 // GLSL Operations/Annotations
 enum gloa : int {
 	// Read and write operations
 	eConstruct, eIndex, eComponent,
+
+	// Invoke function
+	eFunction,
 
 	// Types
 	eNone, eInt32, eFloat32,
@@ -28,6 +33,8 @@ enum gloa : int {
 static constexpr const char *GLOA_STRINGS[] {
 	"Construct", "Index", "Component",
 
+	"Function",
+
 	"None", "Int32", "Float32",
 	"Vec2", "Vec3", "Vec4",
 	"Mat2", "Mat3", "Mat4",
@@ -46,17 +53,20 @@ constexpr size_t gloa_type_offset(gloa x)
 {
 	// NOTE: this is not the same as the actual size
 	switch (x) {
+	case eVec3:
+	case eVec4:
+		return 4 * sizeof(float);
 	case eMat4:
 		return 16 * sizeof(float);
 	default:
 		break;
 	}
 
-	throw "(cppsl) unknown type {} for offset";
+	throw fmt::system_error(1, "(cppsl) unknown type {} for offset", GLOA_STRINGS[x]);
 }
 
 // GLSL Intermediate Representation (atom)
-using gir_t = std::variant <int, float, gloa>;
+using gir_t = std::variant <int, float, gloa, std::string>;
 
 // GLSL Intermediate Representation (tree)
 struct gir_tree {

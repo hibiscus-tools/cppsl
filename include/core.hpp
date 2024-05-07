@@ -148,7 +148,7 @@ struct vec4 : gir_tree {
 	component_ref <vec4, cZ> z = std::ref(*this);
 	component_ref <vec4, cW> w = std::ref(*this);
 
-	vec4(const gir_tree &gt) : gir_tree(gt) {}
+	explicit vec4(const gir_tree &gt) : gir_tree(gt) {}
 
 	// Copies need some care
 	vec4(const vec4 &v) : gir_tree(v) {}
@@ -201,11 +201,31 @@ struct vec4 : gir_tree {
 	} {}
 };
 
+struct mat4;
+
+struct mat3 : gir_tree {
+	static constexpr gloa native_type = eMat3;
+
+	// NOTE: no components for now; that means no need for special care yet
+	explicit mat3(const gir_tree &gt) : gir_tree(gt) {}
+
+	mat3(float x = 0.0f) : gir_tree {
+		gir_tree::cfrom(eConstruct, {
+				gir_tree::cfrom(eMat3),
+				gir_tree::cfrom(1),
+				gir_tree::cfrom(x),
+		})
+	} {}
+
+	// Truncation on mat4
+	mat3(const mat4 &);
+};
+
 struct mat4 : gir_tree {
 	static constexpr gloa native_type = eMat4;
 
 	// NOTE: no components for now; that means no need for special care yet
-	mat4(const gir_tree &gt) : gir_tree(gt) {}
+	explicit mat4(const gir_tree &gt) : gir_tree(gt) {}
 
 	mat4(float x = 0.0f) : gir_tree {
 		gir_tree::cfrom(eConstruct, {
@@ -216,28 +236,12 @@ struct mat4 : gir_tree {
 	} {}
 };
 
-// TODO: arithmetic
-// TODO: header
-inline gir_tree binary_operation(const gir_tree &A, const gir_tree &B, gloa op)
-{
-	return gir_tree::from(op, A.cexpr & B.cexpr, { A, B });
-}
-
-// TODO: templatize
-inline f32 operator+(f32 A, f32 B)
-{
-	return f32(binary_operation(A, B, eAdd));
-}
-
-inline f32 operator*(f32 A, f32 B)
-{
-	return f32(binary_operation(A, B, eMul));
-}
-
-inline vec4 operator*(mat4 A, vec4 B)
-{
-	return vec4(binary_operation(A, B, eMul));
-}
+inline mat3::mat3(const mat4 &m) : gir_tree {
+	gir_tree::cfrom(eConstruct, {
+			gir_tree::cfrom(eMat3),
+			gir_tree::cfrom(1), m
+	})
+} {}
 
 // TODO: requires
 template <typename T, int Binding>
@@ -305,11 +309,11 @@ template <typename T, typename ... Args>
 void push_constants_members_proxy(size_t N, size_t offset, T &sub, Args &... args)
 {
 	// TODO: add size information to pad structures appropriately...
-	sub = gir_tree::vfrom(ePushConstants, {
+	sub = T(gir_tree::vfrom(ePushConstants, {
 		gir_tree::cfrom(T::native_type),
 		gir_tree::cfrom((int) N),
 		gir_tree::cfrom((int) offset)
-	});
+	}));
 
 	if constexpr (sizeof...(Args) > 0)
 		push_constants_members_proxy(N + 1, offset + gloa_type_offset(T::native_type), args...);
@@ -327,4 +331,96 @@ struct vertex {
 	vec4 gl_Position = vec4(0.0f);
 };
 
+}
+
+// TODO: arithmetic
+// TODO: header
+inline gir_tree binary_operation(const gir_tree &A, const gir_tree &B, gloa op)
+{
+	return gir_tree::from(op, A.cexpr & B.cexpr, { A, B });
+}
+
+// TODO: macrofy
+inline f32 operator+(f32 A, f32 B)
+{
+	return f32(binary_operation(A, B, eAdd));
+}
+
+inline f32 operator*(f32 A, f32 B)
+{
+	return f32(binary_operation(A, B, eMul));
+}
+
+inline f32 operator*(float A, f32 B)
+{
+	return f32(A) * B;
+}
+
+inline vec4 operator*(f32 A, vec4 B)
+{
+	return vec4(binary_operation(A, B, eMul));
+}
+
+inline vec4 operator*(float A, vec4 B)
+{
+	return f32(A) * B;
+}
+
+inline vec4 operator*(vec4 A, f32 B)
+{
+	return vec4(binary_operation(A, B, eMul));
+}
+
+inline vec4 operator*(mat4 A, vec4 B)
+{
+	return vec4(binary_operation(A, B, eMul));
+}
+
+inline vec3 operator*(mat3 A, vec3 B)
+{
+	return vec3(binary_operation(A, B, eMul));
+}
+
+inline mat4 operator*(mat4 A, mat4 B)
+{
+	return mat4(binary_operation(A, B, eMul));
+}
+
+inline mat3 operator*(mat3 A, mat3 B)
+{
+	return mat3(binary_operation(A, B, eMul));
+}
+
+// TODO: math.hpp
+inline vec3 normalize(vec3 v)
+{
+	// TODO: function call wrapper
+	return gir_tree::from(eFunction, v.cexpr, {
+		gir_tree::cfrom(eVec3),
+		gir_tree::cfrom("normalize"), v
+	});
+}
+
+inline f32 dot(vec3 A, vec3 B)
+{
+	// TODO: function call wrapper
+	return f32(gir_tree::from(eFunction, A.cexpr & B.cexpr, {
+		gir_tree::cfrom(eFloat32),
+		gir_tree::cfrom("dot"), A, B
+	}));
+}
+
+inline f32 max(f32 A, f32 B)
+{
+	// TODO: function call wrapper
+	return f32(gir_tree::from(eFunction, A.cexpr & B.cexpr, {
+		gir_tree::cfrom(eFloat32),
+		gir_tree::cfrom("max"), A, B
+	}));
+}
+
+template <typename T, typename U, glcomponents C>
+inline auto operator*(const T &t, const component_ref <U, C> &u)
+{
+	return t * typename U::alias::type(u);
 }

@@ -7,6 +7,7 @@
 
 #include <fmt/format.h>
 
+// TODO: replace the constructor translator/handler with this as a table
 inline std::string gloa_type_string(gloa x)
 {
 	// TODO: unordered map?
@@ -21,13 +22,15 @@ inline std::string gloa_type_string(gloa x)
 		return "vec3";
 	case eVec4:
 		return "vec4";
+	case eMat3:
+		return "mat3";
 	case eMat4:
 		return "mat4";
 	default:
 		break;
 	}
 
-	return "<?>";
+	throw fmt::system_error(1, "(cppsl) could not translate type {}", GLOA_STRINGS[x]);
 }
 
 inline std::string format_as(const gir_t &v)
@@ -44,6 +47,10 @@ inline std::string format_as(const gir_t &v)
 		std::string operator()(gloa x) {
 			return GLOA_STRINGS[x];
 		}
+
+		std::string operator()(const std::string &x) {
+			return x;
+		}
 	};
 
 	return std::visit(visitor {}, v);
@@ -58,8 +65,10 @@ inline std::string format_as(const gir_tree &gt, size_t indent = 0)
 		variant = "float";
 	if (std::holds_alternative <gloa> (gt.data))
 		variant = "gloa";
+	if (std::holds_alternative <std::string> (gt.data))
+		variant = "string";
 
-	std::string out = fmt::format("{}({:>5s}: {}: {})", tab, variant, gt.data, gt.cexpr);
+	std::string out = fmt::format("{}({:>7s}: {}: {})", tab, variant, gt.data, gt.cexpr);
 	for (const auto &cgt : gt.children)
 		out += "\n" + format_as(cgt, indent + 4);
 	return out;
@@ -82,6 +91,8 @@ inline std::string format_as(const gcir_graph &gcir)
 			variant = "float";
 		if (std::holds_alternative <gloa> (data))
 			variant = "gloa";
+		if (std::holds_alternative <std::string> (data))
+			variant = "string";
 
 		std::string rs = "";
 		for (size_t i = 0; i < gcir.refs[r].size(); i++) {
@@ -94,7 +105,8 @@ inline std::string format_as(const gcir_graph &gcir)
 			rs = "X";
 
 		std::string tab(t, ' ');
-		out += fmt::format("{:>3}: {}[{:>5s} | {} | {}]\n", r, tab, variant, data, rs);
+		// out += fmt::format("{:>3}: {}[{:>7s} | {} | {}]\n", r, tab, variant, data, rs);
+		out += fmt::format("{:>3}: {}[{} | {}]\n", r, tab, data, rs);
 
 		// Add child reference in reverse order
 		for (auto rc = gcir.refs[r].rbegin(); rc != gcir.refs[r].rend(); rc++)

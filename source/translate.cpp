@@ -103,20 +103,27 @@ struct translator {
 		return statements;
 	}
 
-	statement_list handle_construct_vec4(const refs &R) {
+	statement_list handle_construct_vector(const refs &R) {
+		static const std::unordered_map <gloa, std::string> VECTOR_CONSTRUCTOR {
+			{ eVec3, "vec3" },
+			{ eVec4, "vec4" },
+			{ eMat3, "mat3" },
+		};
+
+		gloa type = std::get <gloa> (graph.data[R[0]]);
 		int count = std::get <int> (graph.data[R[1]]);
 
-		statement_list v;
+		statement_list statements;
 		std::vector <std::string> args;
 		for (int i = 0; i < count; i++) {
 			auto [vi, last] = cached_translation(R[i + 2]);
-			v.insert(v.end(), vi.begin(), vi.end());
+			statements.insert(statements.end(), vi.begin(), vi.end());
 			args.push_back(last.full_loc());
 		}
 
-		statement after = statement::from(eVec4, function_call("vec4", args), generator);
-		v.push_back(after);
-		return v;
+		statement after = statement::from(type, function_call(VECTOR_CONSTRUCTOR.at(type), args), generator);
+		statements.push_back(after);
+		return statements;
 	}
 
 	statement_list handle_construct(const refs &R) {
@@ -125,8 +132,8 @@ struct translator {
 		// TODO: switch?
 		if (type == eFloat32)
 			return handle_construct_f32(R);
-		if (type == eVec4)
-			return handle_construct_vec4(R);
+		if (type == eVec3 || type == eVec4 || type == eMat3)
+			return handle_construct_vector(R);
 
 		throw fmt::system_error(1, "(cppsl) unknown type {}", type);
 	}
@@ -142,8 +149,29 @@ struct translator {
 	}
 
 	statement_list handle_binary_operation(const refs &R, gloa op) {
+		// TODO: inject return type within the binary expression...
+		using overload = std::tuple <gloa, gloa, gloa>;
+
+		struct hasher {
+			size_t operator()(const overload &ovl) const {
+				size_t h0 = std::hash <gloa> {} (std::get <0> (ovl));
+				size_t h1 = std::hash <gloa> {} (std::get <1> (ovl));
+				size_t h2 = std::hash <gloa> {} (std::get <2> (ovl));
+				return h0 ^ h1 ^ h2;
+			}
+		};
+
 		static const std::unordered_map <gloa, std::string> OPERATION_MAP {
 			{ eAdd, "+" }, { eMul, "*" }
+		};
+
+		static const std::unordered_map <overload, gloa, hasher> OVERLOAD_MAP {
+			{ { eMul, eFloat32, eFloat32 }, eFloat32 },
+			{ { eMul, eVec4, eFloat32}, eVec4 },
+			{ { eMul, eMat3, eMat3 }, eMat3 },
+			{ { eMul, eMat3, eVec3 }, eVec3 },
+			{ { eMul, eMat4, eMat4 }, eMat4 },
+			{ { eMul, eMat4, eVec4 }, eVec4 },
 		};
 
 		assert(R.size() == 2);
@@ -151,12 +179,37 @@ struct translator {
 		auto [s1, s1_last] = cached_translation(R[1]);
 
 		// TODO: check the type maps...
-		gloa type = s1_last.loc.type;
+		overload ovl = { op, s0_last.loc.type, s1_last.loc.type };
+		if (OVERLOAD_MAP.count(ovl) == 0) {
+			throw fmt::system_error(1, "(cppsl) no overload found for operation {}: ({}, {})",
+				std::get <0> (ovl), std::get <1> (ovl), std::get <2> (ovl));
+		}
+
+		gloa type = OVERLOAD_MAP.at(ovl);
+		// gloa type = s1_last.loc.type;
 		statement after = statement::from(type, fmt::format("{} {} {}", s0_last.full_loc(), OPERATION_MAP.at(op), s1_last.full_loc()), generator);
 
 		std::vector <statement> statements;
 		statements.insert(statements.end(), s0.begin(), s0.end());
 		statements.insert(statements.end(), s1.begin(), s1.end());
+		statements.push_back(after);
+		return statements;
+	}
+
+	statement_list handle_function(const refs &R) {
+		gloa type = std::get <gloa> (graph.data[R[0]]);
+		std::string ftn = std::get <std::string> (graph.data[R[1]]);
+
+		statement_list statements;
+
+		std::vector <std::string> args;
+		for (int i = 2; i < R.size(); i++) {
+			auto [vi, last] = cached_translation(R[i]);
+			statements.insert(statements.end(), vi.begin(), vi.end());
+			args.push_back(last.full_loc());
+		}
+
+		statement after = statement::from(type, function_call(ftn, args), generator);
 		statements.push_back(after);
 		return statements;
 	}
@@ -178,6 +231,8 @@ struct translator {
 			return handle_layout_output(R);
 		case ePushConstants:
 			return handle_push_constants(R);
+		case eFunction:
+			return handle_function(R);
 		case eAdd:
 		case eMul:
 			return handle_binary_operation(R, x);
@@ -194,6 +249,10 @@ struct translator {
 
 	statement_list operator()(float x) {
 		return { statement::from(eFloat32, fmt::format("{}", x), generator) };
+	}
+
+	statement_list operator()(const std::string &x) {
+		throw fmt::system_error(1, "(cppsl) unexpected string node {}", x);
 	}
 
 	statement_list translate(int t = 0) {
@@ -322,6 +381,8 @@ std::string translate(const gcir_graph &graph, const std::vector <unt_layout_out
 		code += fmt::format("  {}\n", s);
 
 	code += "}\n";
+
+	fmt::println("final source:\n{}", code);
 
 	return code;
 }
