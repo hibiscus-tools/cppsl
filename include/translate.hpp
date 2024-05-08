@@ -15,17 +15,16 @@ struct identifier {
 	gloa type;
 	std::string prefix;
 	int id;
-	std::string postfix; // TODO: obselete? Only for arrays, components, etc.
 
 	std::string full_id() const {
 		if (type == eNone)
-			return prefix + postfix;
+			return prefix;
 
-		return prefix + std::to_string(id) + postfix;
+		return prefix + std::to_string(id);
 	}
 
-	static identifier from(gloa type, int &generator, const std::string &postfix) {
-		return { type, "_v", generator++, postfix };
+	static identifier from(gloa type, int &generator) {
+		return { type, "_v", generator++ };
 	}
 
 	static identifier builtin_from(const std::string &prefix) {
@@ -41,8 +40,8 @@ struct statement {
 		return loc.full_id();
 	}
 
-	static statement from(gloa type, const std::string &source, int &generator, const std::string &postfix = "") {
-		return { identifier::from(type, generator, postfix), source };
+	static statement from(gloa type, const std::string &source, int &generator) {
+		return { identifier::from(type, generator), source };
 	}
 
 	static statement builtin_from(const std::string &prefix, const std::string &source) {
@@ -59,7 +58,6 @@ struct unt_layout_output {
 	gir_tree gt;
 };
 
-// TODO: support multi output programs
 namespace detail {
 
 std::string translate(const gcir_graph &, const std::vector <unt_layout_output> &);
@@ -143,77 +141,35 @@ struct gather_shader_outputs {
 };
 
 template <Stage stage, typename F>
-struct translate_dispatcher {
-	std::string operator()(const F &ftn) {
-		return "";
-	}
-};
-
-template <typename F>
-struct translate_dispatcher <Stage::Vertex, F> {
-	std::string operator()(const F &ftn) {
-		// TODO: check argument compatibility before, then no need for optional vintr
-		auto args = args_for_shader(ftn);
-		auto gatherer = gather_shader_outputs(ftn);
-		std::apply(ftn, args);
-		shader_outputs souts = std::apply(gatherer, args);
-
-		// Unify all outputs into a single tree
-		std::vector <gir_tree> outputs;
-
-		bool cexpr = true;
-
-		// TODO: check for presence of vintr
-		vec4 gl_Position = souts.vintr->gl_Position;
-
-		cexpr &= gl_Position.cexpr;
-		outputs.push_back(gir_tree::from(eGlPosition, gl_Position.cexpr, { gl_Position }));
-
-		for (const unt_layout_output &lout : souts.louts) {
-			cexpr &= lout.gt.cexpr;
-			outputs.push_back(gir_tree::from(eLayoutOutput, lout.gt.cexpr, {
-				gir_tree::cfrom(lout.binding),
-				lout.gt
-			}));
-		}
-
-		gir_tree unified = gir_tree::from(eNone, cexpr, outputs);
-		gcir_graph graph = compress(unified);
-
-		return detail::translate(graph, souts.louts);
-	}
-};
-
-template <typename F>
-struct translate_dispatcher <Stage::Fragment, F> {
-	std::string operator()(const F &ftn) {
-		// TODO: check argument compatibility before, then no need for optional vintr
-		auto args = args_for_shader(ftn);
-		auto gatherer = gather_shader_outputs(ftn);
-		std::apply(ftn, args);
-		shader_outputs souts = std::apply(gatherer, args);
-
-		// Unify all outputs into a single tree
-		std::vector <gir_tree> outputs;
-
-		bool cexpr = true;
-		for (const unt_layout_output &lout : souts.louts) {
-			cexpr &= lout.gt.cexpr;
-			outputs.push_back(gir_tree::from(eLayoutOutput, lout.gt.cexpr, {
-				gir_tree::cfrom(lout.binding),
-				lout.gt
-			}));
-		}
-
-		gir_tree unified = gir_tree::from(eNone, cexpr, outputs);
-		gcir_graph graph = compress(unified);
-
-		return detail::translate(graph, souts.louts);
-	}
-};
-
-template <Stage stage, typename F>
 std::string translate(const F &ftn)
 {
-	return translate_dispatcher <stage, F> {} (ftn);
+	auto args = args_for_shader(ftn);
+	auto gatherer = gather_shader_outputs(ftn);
+	std::apply(ftn, args);
+	shader_outputs souts = std::apply(gatherer, args);
+
+	// Unify all outputs into a single tree
+	std::vector <gir_tree> outputs;
+
+	bool cexpr = true;
+
+	// TODO: check for presence of vintr
+	if (souts.vintr && stage == Stage::Vertex) {
+		vec4 gl_Position = souts.vintr->gl_Position;
+		cexpr &= gl_Position.cexpr;
+		outputs.push_back(gir_tree::from(eGlPosition, gl_Position.cexpr, { gl_Position }));
+	}
+
+	for (const unt_layout_output &lout : souts.louts) {
+		cexpr &= lout.gt.cexpr;
+		outputs.push_back(gir_tree::from(eLayoutOutput, lout.gt.cexpr, {
+			gir_tree::cfrom(lout.binding),
+			lout.gt
+		}));
+	}
+
+	gir_tree unified = gir_tree::from(eNone, cexpr, outputs);
+	gcir_graph graph = compress(unified);
+
+	return detail::translate(graph, souts.louts);
 }

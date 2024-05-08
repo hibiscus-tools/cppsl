@@ -335,20 +335,20 @@ struct vertex {
 
 // TODO: arithmetic
 // TODO: header
-inline gir_tree binary_operation(const gir_tree &A, const gir_tree &B, gloa op)
+inline gir_tree binary_operation(const gir_tree &A, const gir_tree &B, gloa op, gloa rtype)
 {
-	return gir_tree::from(op, A.cexpr & B.cexpr, { A, B });
+	return gir_tree::from(op, A.cexpr & B.cexpr, { gir_tree::cfrom(rtype), A, B });
 }
 
 // TODO: macrofy
 inline f32 operator+(f32 A, f32 B)
 {
-	return f32(binary_operation(A, B, eAdd));
+	return f32(binary_operation(A, B, eAdd, eFloat32));
 }
 
 inline f32 operator*(f32 A, f32 B)
 {
-	return f32(binary_operation(A, B, eMul));
+	return f32(binary_operation(A, B, eMul, eFloat32));
 }
 
 inline f32 operator*(float A, f32 B)
@@ -358,7 +358,7 @@ inline f32 operator*(float A, f32 B)
 
 inline vec4 operator*(f32 A, vec4 B)
 {
-	return vec4(binary_operation(A, B, eMul));
+	return vec4(binary_operation(A, B, eMul, eVec4));
 }
 
 inline vec4 operator*(float A, vec4 B)
@@ -368,27 +368,27 @@ inline vec4 operator*(float A, vec4 B)
 
 inline vec4 operator*(vec4 A, f32 B)
 {
-	return vec4(binary_operation(A, B, eMul));
+	return vec4(binary_operation(A, B, eMul, eVec4));
 }
 
 inline vec4 operator*(mat4 A, vec4 B)
 {
-	return vec4(binary_operation(A, B, eMul));
+	return vec4(binary_operation(A, B, eMul, eVec4));
 }
 
 inline vec3 operator*(mat3 A, vec3 B)
 {
-	return vec3(binary_operation(A, B, eMul));
+	return vec3(binary_operation(A, B, eMul, eVec3));
 }
 
 inline mat4 operator*(mat4 A, mat4 B)
 {
-	return mat4(binary_operation(A, B, eMul));
+	return mat4(binary_operation(A, B, eMul, eMat4));
 }
 
 inline mat3 operator*(mat3 A, mat3 B)
 {
-	return mat3(binary_operation(A, B, eMul));
+	return mat3(binary_operation(A, B, eMul, eMat3));
 }
 
 // TODO: math.hpp

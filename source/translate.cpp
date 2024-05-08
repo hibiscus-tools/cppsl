@@ -149,45 +149,16 @@ struct translator {
 	}
 
 	statement_list handle_binary_operation(const refs &R, gloa op) {
-		// TODO: inject return type within the binary expression...
-		using overload = std::tuple <gloa, gloa, gloa>;
-
-		struct hasher {
-			size_t operator()(const overload &ovl) const {
-				size_t h0 = std::hash <gloa> {} (std::get <0> (ovl));
-				size_t h1 = std::hash <gloa> {} (std::get <1> (ovl));
-				size_t h2 = std::hash <gloa> {} (std::get <2> (ovl));
-				return h0 ^ h1 ^ h2;
-			}
-		};
-
 		static const std::unordered_map <gloa, std::string> OPERATION_MAP {
 			{ eAdd, "+" }, { eMul, "*" }
 		};
 
-		static const std::unordered_map <overload, gloa, hasher> OVERLOAD_MAP {
-			{ { eMul, eFloat32, eFloat32 }, eFloat32 },
-			{ { eMul, eVec4, eFloat32}, eVec4 },
-			{ { eMul, eMat3, eMat3 }, eMat3 },
-			{ { eMul, eMat3, eVec3 }, eVec3 },
-			{ { eMul, eMat4, eMat4 }, eMat4 },
-			{ { eMul, eMat4, eVec4 }, eVec4 },
-		};
+		assert(R.size() == 3);
+		gloa rtype = std::get <gloa> (graph.data[R[0]]);
+		auto [s0, s0_last] = cached_translation(R[1]);
+		auto [s1, s1_last] = cached_translation(R[2]);
 
-		assert(R.size() == 2);
-		auto [s0, s0_last] = cached_translation(R[0]);
-		auto [s1, s1_last] = cached_translation(R[1]);
-
-		// TODO: check the type maps...
-		overload ovl = { op, s0_last.loc.type, s1_last.loc.type };
-		if (OVERLOAD_MAP.count(ovl) == 0) {
-			throw fmt::system_error(1, "(cppsl) no overload found for operation {}: ({}, {})",
-				std::get <0> (ovl), std::get <1> (ovl), std::get <2> (ovl));
-		}
-
-		gloa type = OVERLOAD_MAP.at(ovl);
-		// gloa type = s1_last.loc.type;
-		statement after = statement::from(type, fmt::format("{} {} {}", s0_last.full_loc(), OPERATION_MAP.at(op), s1_last.full_loc()), generator);
+		statement after = statement::from(rtype, fmt::format("{} {} {}", s0_last.full_loc(), OPERATION_MAP.at(op), s1_last.full_loc()), generator);
 
 		std::vector <statement> statements;
 		statements.insert(statements.end(), s0.begin(), s0.end());
